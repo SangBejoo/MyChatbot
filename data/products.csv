@@ -1,0 +1,10 @@
+ID,Name,Category,Type,Price,Currency,Details
+P001,Steel Rods,General,Export,500,USD,High-grade steel rods 10mm diameter
+P002,Copper Wires,General,Export,800,USD,Pure copper wire suitable for electrical use
+P003,Electronics,Luxury,Import,5000,USD,Premium electronic components
+P004,Leather Bags,Luxury,Import,2000,USD,Italian leather luxury bags
+P005,Coffee Beans,General,Export,15,USD,Per kg - Arabica premium quality
+P006,Textiles,General,Export,10,USD,Per meter - Cotton blend fabrics
+P007,Watches,Luxury,Import,10000,USD,Swiss luxury watches
+P008,Spices,General,Export,25,USD,Per kg - Mixed spice blend
+P009,Tumbler,General,Export,5,USD,Per kg - Plastic tumbler from China
