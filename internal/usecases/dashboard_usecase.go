@@ -19,66 +19,66 @@ func NewDashboardUsecase(configRepo *repository.ConfigRepository, productRepo *r
 	}
 }
 
-// Product Management
+// Product Management (shared across tenants - uses public schema)
 func (u *DashboardUsecase) GetAllProducts() []repository.Product {
 	return u.productRepo.GetAllProducts()
 }
 
-// Config Management
-func (u *DashboardUsecase) GetConfig(key string) (string, error) {
-	return u.configRepo.GetConfig(key)
+// Config Management (tenant-aware)
+func (u *DashboardUsecase) GetConfig(schemaName, key string) (string, error) {
+	return u.configRepo.GetConfig(schemaName, key)
 }
 
-func (u *DashboardUsecase) SetConfig(key, value string) error {
-	return u.configRepo.SetConfig(key, value)
+func (u *DashboardUsecase) SetConfig(schemaName, key, value string) error {
+	return u.configRepo.SetConfig(schemaName, key, value)
 }
 
-func (u *DashboardUsecase) GetAllConfigs() ([]repository.BotConfig, error) {
-	return u.configRepo.GetAllConfigs()
+func (u *DashboardUsecase) GetAllConfigs(schemaName string) ([]repository.BotConfig, error) {
+	return u.configRepo.GetAllConfigs(schemaName)
 }
 
-// Menu Management
-func (u *DashboardUsecase) GetMenu(slug string) (*repository.Menu, error) {
-	return u.configRepo.GetMenu(slug)
+// Menu Management (tenant-aware)
+func (u *DashboardUsecase) GetMenu(schemaName, slug string) (*repository.Menu, error) {
+	return u.configRepo.GetMenu(schemaName, slug)
 }
 
-func (u *DashboardUsecase) CreateMenu(m *repository.Menu) error {
-	return u.configRepo.CreateMenu(m)
+func (u *DashboardUsecase) CreateMenu(schemaName string, m *repository.Menu) error {
+	return u.configRepo.CreateMenu(schemaName, m)
 }
 
-func (u *DashboardUsecase) UpdateMenu(m *repository.Menu) error {
-	return u.configRepo.UpdateMenu(m)
+func (u *DashboardUsecase) UpdateMenu(schemaName string, m *repository.Menu) error {
+	return u.configRepo.UpdateMenu(schemaName, m)
 }
 
-func (u *DashboardUsecase) DeleteMenu(slug string) error {
-	return u.configRepo.DeleteMenu(slug)
+func (u *DashboardUsecase) DeleteMenu(schemaName, slug string) error {
+	return u.configRepo.DeleteMenu(schemaName, slug)
 }
 
-func (u *DashboardUsecase) GetAllMenus() ([]repository.Menu, error) {
-	return u.configRepo.GetAllMenus()
+func (u *DashboardUsecase) GetAllMenus(schemaName string) ([]repository.Menu, error) {
+	return u.configRepo.GetAllMenus(schemaName)
 }
 
-// Dynamic Data Management
-func (u *DashboardUsecase) ImportTable(displayName string, csvData io.Reader) error {
-	return u.tableManager.ImportCSV(displayName, csvData)
+// Dynamic Data Management (tenant-aware)
+func (u *DashboardUsecase) ImportTable(schemaName, displayName string, csvData io.Reader) error {
+	return u.tableManager.ImportCSV(schemaName, displayName, csvData)
 }
 
-func (u *DashboardUsecase) ListTables() ([]repository.TableMetadata, error) {
-	return u.tableManager.ListTables()
+func (u *DashboardUsecase) ListTables(schemaName string) ([]repository.TableMetadata, error) {
+	return u.tableManager.ListTables(schemaName)
 }
 
-func (u *DashboardUsecase) GetTableData(tableName string) ([]map[string]interface{}, error) {
-	return u.tableManager.GetTableData(tableName)
+func (u *DashboardUsecase) GetTableData(schemaName, tableName string) ([]map[string]interface{}, error) {
+	return u.tableManager.GetTableData(schemaName, tableName)
 }
 
-func (u *DashboardUsecase) DeleteTable(tableName string) error {
-	return u.tableManager.DeleteTable(tableName)
+func (u *DashboardUsecase) DeleteTable(schemaName, tableName string) error {
+	return u.tableManager.DeleteTable(schemaName, tableName)
 }
 
-func (u *DashboardUsecase) UpdateRow(tableName string, rowID int, data map[string]interface{}) error {
-	return u.tableManager.UpdateRow(tableName, rowID, data)
+func (u *DashboardUsecase) UpdateRow(schemaName, tableName string, rowID int, data map[string]interface{}) error {
+	return u.tableManager.UpdateRow(schemaName, tableName, rowID, data)
 }
 
-func (u *DashboardUsecase) DeleteRow(tableName string, rowID int) error {
-	return u.tableManager.DeleteRow(tableName, rowID)
+func (u *DashboardUsecase) DeleteRow(schemaName, tableName string, rowID int) error {
+	return u.tableManager.DeleteRow(schemaName, tableName, rowID)
 }

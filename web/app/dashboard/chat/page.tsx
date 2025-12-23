@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState,  useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import api from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
@@ -8,13 +8,12 @@ import { Loader2, LogOut, RefreshCw, Smartphone } from 'lucide-react';
 
 export default function ChatPage() {
   const [status, setStatus] = useState<'connected' | 'disconnected' | 'loading'>('loading');
-  const [qrKey, setQrKey] = useState(0); // Used to force refresh QR image
+  const [qrUrl, setQrUrl] = useState<string | null>(null);
   const [userInfo, setUserInfo] = useState<{ phone: string; name: string } | null>(null);
 
   const checkStatus = useCallback(async () => {
     try {
-      const res = await fetch('http://localhost:8080/whatsapp/status');
-      const data = await res.json();
+      const { data } = await api.get('/whatsapp/status');
       if (data.connected) {
         setStatus('connected');
         setUserInfo({ phone: data.phone, name: data.name });
@@ -26,25 +25,64 @@ export default function ChatPage() {
       console.error('Failed to check status', error);
       setStatus('disconnected');
     }
-  }, []); // Empty dependencies since it doesn't depend on props/state
+  }, []);
+
+  const fetchQR = useCallback(async () => {
+    try {
+      // First try to connect
+      await api.post('/whatsapp/connect').catch(() => {});
+      
+      const response = await api.get('/whatsapp/qr', { responseType: 'blob' });
+      
+      // Check if it's text (already logged in or error)
+      if (response.data.type?.includes('text')) {
+        const text = await response.data.text();
+        if (text === 'Already logged in') {
+          checkStatus();
+        }
+        return;
+      }
+      
+      // Create blob URL for image
+      const url = URL.createObjectURL(response.data);
+      setQrUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return url;
+      });
+    } catch (error) {
+      console.error('Failed to fetch QR', error);
+    }
+  }, [checkStatus]);
 
   useEffect(() => {
     checkStatus();
-    const interval = setInterval(() => {
-        if (status !== 'connected') {
-            checkStatus();
-            setQrKey(prev => prev + 1); // Refresh QR every few seconds to prevent expiration awareness drift
-        }
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [status, checkStatus]);
+  }, [checkStatus]);
+
+  useEffect(() => {
+    if (status === 'disconnected') {
+      fetchQR();
+      const interval = setInterval(() => {
+        fetchQR();
+        checkStatus();
+      }, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [status, fetchQR, checkStatus]);
+
+  // Cleanup blob URLs
+  useEffect(() => {
+    return () => {
+      if (qrUrl) URL.revokeObjectURL(qrUrl);
+    };
+  }, [qrUrl]);
 
   const handleLogout = async () => {
     try {
-      await fetch('http://localhost:8080/whatsapp/logout', { method: 'POST' });
+      await api.post('/whatsapp/logout');
       setStatus('disconnected');
       setUserInfo(null);
-      checkStatus(); // Force check
+      setQrUrl(null);
+      checkStatus();
     } catch (error) {
       alert('Failed to logout');
     }
@@ -65,13 +103,17 @@ export default function ChatPage() {
           {status === 'disconnected' && (
             <div className="space-y-4">
                 <div className="border-4 border-gray-900 rounded-lg p-2 inline-block bg-white">
-                    {/* QR Code Image - Add timestamp to force reload */}
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img 
-                        src={`http://localhost:8080/whatsapp/qr?t=${qrKey}`} 
-                        alt="WhatsApp QR Code" 
-                        className="w-64 h-64 object-contain"
-                    />
+                    {qrUrl ? (
+                      <img 
+                          src={qrUrl} 
+                          alt="WhatsApp QR Code" 
+                          className="w-64 h-64 object-contain"
+                      />
+                    ) : (
+                      <div className="w-64 h-64 flex items-center justify-center">
+                        <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                      </div>
+                    )}
                 </div>
                 <p className="text-sm text-gray-500">
                     Open WhatsApp on your phone <br/> Go to <b>Settings &gt; Linked Devices</b> <br/> and scan this code.
@@ -115,3 +157,4 @@ export default function ChatPage() {
     </div>
   );
 }
+

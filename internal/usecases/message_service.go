@@ -48,7 +48,7 @@ If the question is outside your knowledge, politely decline.
 Do NOT make up information.`
 
 	if s.ConfigRepo != nil {
-		if customPrompt, err := s.ConfigRepo.GetConfig("ai_system_prompt"); err == nil && customPrompt != "" {
+		if customPrompt, err := s.ConfigRepo.GetConfig("public", "ai_system_prompt"); err == nil && customPrompt != "" {
 			systemPrompt = customPrompt
 		}
 	}
@@ -81,7 +81,7 @@ func (s *MessageService) handleDynamicMenu(msg entities.Message) (bool, error) {
 	}
 
 	// Fetch 'main_menu' (hardcoded for now, could be contextual)
-	menu, err := s.ConfigRepo.GetMenu("main_menu")
+	menu, err := s.ConfigRepo.GetMenu("public", "main_menu")
 	
 	// If menu doesn't exist, ignore (or log)
 	if err != nil {
@@ -127,7 +127,7 @@ func (s *MessageService) handleViewTable(to, tableName string) (bool, error) {
 	if s.TableManager == nil {
 		return false, fmt.Errorf("table manager not initialized")
 	}
-	data, err := s.TableManager.GetTableData(tableName)
+	data, err := s.TableManager.GetTableData("public", tableName)
 	if err != nil {
 		return true, s.WhatsAppClient.SendMessage(to, fmt.Sprintf("Error fetching table '%s': %v", tableName, err))
 	}

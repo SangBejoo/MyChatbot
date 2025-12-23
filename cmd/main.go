@@ -38,6 +38,7 @@ func main() {
 	userRepo := repository.NewUserRepository(pgClient.Pool)
 	configRepo := repository.NewConfigRepository(pgClient.Pool)
 	tableManager := repository.NewTableManager(pgClient.Pool)
+	tenantManager := repository.NewTenantManager(pgClient.Pool)
 
 	// Sync Data
 	err = repo.SyncFromCSV("data/products.csv")
@@ -46,7 +47,7 @@ func main() {
 	}
 	
 	// Initialize Usecases & Services
-	authUsecase := usecases.NewAuthUsecase(userRepo, os.Getenv("JWT_SECRET"))
+	authUsecase := usecases.NewAuthUsecase(userRepo, tenantManager, os.Getenv("JWT_SECRET"))
 	
 	// Ensure Admin User
 	if err := authUsecase.EnsureAdmin("root", "root"); err != nil {
@@ -69,72 +70,62 @@ func main() {
 	sessionManager := infrastructure.NewSessionManager()
 	pricingCalc := usecases.NewPricingCalculator(repo)
 
-	// Initialize WhatsApp client
-	whatsAppClient, err := infrastructure.NewWhatsAppClient("device.db")
-	if err != nil {
-		panic("Failed to create WhatsApp client: " + err.Error())
-	}
-	messageService.WhatsAppClient = whatsAppClient
-
-	// WhatsApp Message Handler
-	whatsAppClient.AddHandler(func(evt interface{}) {
-		// Only check for new messages
-		switch v := evt.(type) {
-		case *events.Message:
-			sender, content := whatsAppClient.ParseMessage(v)
-			
-			// Ignore messages from self or status updates
-			if v.Info.IsGroup { return }
-
-			// Handle regular text menu selection
-			// "1. 🧮 Calculate Price"
-			if content == "1" || strings.Contains(strings.ToLower(content), "calculate") {
-				whatsAppClient.SendMessage(sender, "📝 Enter product details:\n\nFormat: *30 tumbler 30kg*\n\n(quantity product weight)")
-				return
+	// Initialize WhatsApp Manager (per-user clients)
+	waManager := infrastructure.NewWhatsAppManager("devices")
+	
+	// Handler factory for per-user WhatsApp message routing
+	waManager.HandlerFactory = func(userID int, schemaName string) func(interface{}) {
+		return func(evt interface{}) {
+			switch v := evt.(type) {
+			case *events.Message:
+				client := waManager.GetClient(userID)
+				if client == nil {
+					return
+				}
+				
+				sender, content := client.ParseMessage(v)
+				
+				// Ignore group messages
+				if v.Info.IsGroup {
+					return
+				}
+				
+				// Handle regular text menu selection
+				if content == "1" || strings.Contains(strings.ToLower(content), "calculate") {
+					client.SendMessage(sender, "📝 Enter product details:\n\nFormat: *30 tumbler 30kg*\n\n(quantity product weight)")
+					return
+				}
+				
+				// Pricing calculation check
+				if strings.Contains(content, "kg") || strings.Contains(content, "g") {
+					parsed := pricingCalc.ParseQuery(content)
+					result := pricingCalc.CalculatePrice(parsed)
+					client.SendMessage(sender, result+"\n\nReply with *1* to calculate again.")
+					return
+				}
+				
+				// Process message with tenant context
+				msg := entities.Message{
+					From:       strings.TrimSuffix(sender, "@s.whatsapp.net"),
+					Content:    content,
+					Platform:   "whatsapp",
+					SchemaName: schemaName, // Tenant-specific
+				}
+				
+				client.SendPresence(sender)
+				msg.AIContext = repo.FormatAsContext(repo.GetAllProducts())
+				
+				// Create tenant-aware service copy
+				tenantService := *messageService
+				tenantService.WhatsAppClient = client
+				go tenantService.ProcessMessage(msg)
 			}
-			
-			// Pricing calculation check
-			if strings.Contains(content, "kg") || strings.Contains(content, "g") {
-				parsed := pricingCalc.ParseQuery(content)
-				result := pricingCalc.CalculatePrice(parsed)
-				whatsAppClient.SendMessage(sender, result + "\n\nReply with *1* to calculate again.")
-				return
-			}
-
-			// Dynamic Menu Check (via MessageService)
-			msg := entities.Message{
-				From:     strings.TrimSuffix(sender, "@s.whatsapp.net"),
-				Content:  content,
-				Platform: "whatsapp",
-			}
-			// We try dynamic menu first inside ProcessMessage, but here we invoke it manually or just pass to ProcessMessage
-			// The ProcessMessage inside MessageService now handles dynamic menu logic FIRST.
-			// So we can just delegate everything to ProcessMessageWithContext (which checks AI) OR ProcessMessage (checks menu + AI)
-			// Wait, ProcessMessageWithContext does NOT check Dynamic Menu in my implementation?
-			// My implementation updated ProcessMessage. 
-			// I should use ProcessMessage if I want menu check. 
-			// But I also want RAG context.
-			// Let's update ProcessMessageWithContext to ALSO check Dynamic Menu? 
-			// Or better: Let ProcessMessage handle it.
-			// Let's rely on ProcessMessage logic I wrote which falls back to AI.
-			// But for RAG, I needed `AIContext`.
-			// Let's add `AIContext` to msg and call `ProcessMessage` (I need to update ProcessMessage to use Context if present).
-			// For now, let's keep it simple: Use ProcessMessage.
-			
-			whatsAppClient.SendPresence(sender)
-			msg.AIContext = repo.FormatAsContext(repo.GetAllProducts())
-			go messageService.ProcessMessage(msg) // Changed to ProcessMessage to use new Logic
 		}
-	})
-
-	// Connect WhatsApp
-	if err := whatsAppClient.Connect(); err != nil {
-		fmt.Println("Error connecting to WhatsApp:", err)
 	}
 
 	// Setup HTTP server
 	r := gin.Default()
-	http.SetupRoutes(r, messageService, authUsecase, dashboardUsecase, authMiddleware)
+	http.SetupRoutes(r, messageService, authUsecase, dashboardUsecase, waManager, userRepo, authMiddleware)
 	go func() {
 		if err := r.Run("0.0.0.0:8080"); err != nil {
 			fmt.Printf("FAILED to start HTTP Server: %v\n", err)
@@ -167,7 +158,7 @@ func main() {
 				msg := tgbotapi.NewMessage(chatID, "Welcome! 👋")
 				
 				// Fetch dynamic main_menu
-				menu, err := configRepo.GetMenu("main_menu")
+				menu, err := configRepo.GetMenu("public", "main_menu")
 				if err == nil {
 					msg.Text = menu.Title + "\n\nChoose an option:"
 					
@@ -242,7 +233,7 @@ func main() {
 					switch action {
 					case "view_table":
 						// Fetch table data
-						data, err := tableManager.GetTableData(payload)
+						data, err := tableManager.GetTableData("public", payload)
 						if err != nil {
 							bot.Send(tgbotapi.NewMessage(chatID, "Error fetching data: "+err.Error()))
 							continue

@@ -49,8 +49,32 @@ func (m *Middleware) AuthRequired() gin.HandlerFunc {
 		if claims, ok := token.Claims.(jwt.MapClaims); ok {
 			c.Set("user_id", claims["user_id"])
 			c.Set("role", claims["role"])
+			// Extract schema_name for multi-tenancy
+			if schema, exists := claims["schema_name"]; exists && schema != nil {
+				c.Set("schema_name", schema.(string))
+			} else {
+				c.Set("schema_name", "public") // Default fallback
+			}
 		}
 
+		c.Next()
+	}
+}
+
+// AdminRequired middleware - requires role == "admin" (must follow AuthRequired)
+func (m *Middleware) AdminRequired() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		role, exists := c.Get("role")
+		if !exists {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Role not found"})
+			return
+		}
+		
+		if role != "admin" {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Admin access required"})
+			return
+		}
+		
 		c.Next()
 	}
 }

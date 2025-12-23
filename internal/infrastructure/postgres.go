@@ -55,12 +55,19 @@ func (p *PostgresClient) Migrate() error {
 			username VARCHAR(50) UNIQUE NOT NULL,
 			password_hash VARCHAR(255) NOT NULL,
 			role VARCHAR(20) DEFAULT 'user',
+			schema_name VARCHAR(128),
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		);
 	`)
+
 	if err != nil {
 		return fmt.Errorf("create users table: %w", err)
 	}
+	
+	// Migration: Add schema_name column if it doesn't exist (for existing databases)
+	_, _ = p.Pool.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS schema_name VARCHAR(128)`)
+	_, _ = p.Pool.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE`)
+	_, _ = p.Pool.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS wa_enabled BOOLEAN DEFAULT TRUE`)
 
 	// Products Table (replacing CSV)
 	_, err = p.Pool.Exec(ctx, `

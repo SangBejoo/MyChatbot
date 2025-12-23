@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"project_masAde/internal/entities"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -12,28 +13,161 @@ type UserRepository struct {
 	db *pgxpool.Pool
 }
 
+type PlatformStats struct {
+	TotalUsers      int `json:"total_users"`
+	ActiveUsers     int `json:"active_users"`
+	WAEnabledUsers  int `json:"wa_enabled_users"`
+	AdminCount      int `json:"admin_count"`
+}
+
+type UserListItem struct {
+	ID         int       `json:"id"`
+	Username   string    `json:"username"`
+	Role       string    `json:"role"`
+	SchemaName string    `json:"schema_name"`
+	IsActive   bool      `json:"is_active"`
+	WAEnabled  bool      `json:"wa_enabled"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
 func NewUserRepository(db *pgxpool.Pool) *UserRepository {
 	return &UserRepository{db: db}
 }
 
-func (r *UserRepository) Create(user *entities.User) error {
-	_, err := r.db.Exec(context.Background(),
-		"INSERT INTO users (username, password_hash, role) VALUES ($1, $2, $3)",
-		user.Username, user.PasswordHash, user.Role)
-	return err
+func (r *UserRepository) Create(user *entities.User) (int, error) {
+	var id int
+	err := r.db.QueryRow(context.Background(),
+		"INSERT INTO users (username, password_hash, role, schema_name, is_active, wa_enabled) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+		user.Username, user.PasswordHash, user.Role, user.SchemaName, true, true).Scan(&id)
+	return id, err
 }
 
 func (r *UserRepository) GetByUsername(username string) (*entities.User, error) {
 	var user entities.User
+	var schemaName *string
+	var isActive, waEnabled *bool
 	err := r.db.QueryRow(context.Background(),
-		"SELECT id, username, password_hash, role FROM users WHERE username = $1",
-		username).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role)
+		"SELECT id, username, password_hash, role, schema_name, COALESCE(is_active, true), COALESCE(wa_enabled, true) FROM users WHERE username = $1",
+		username).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &schemaName, &isActive, &waEnabled)
 	
 	if err == pgx.ErrNoRows {
-		return nil, nil // Not found
+		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	if schemaName != nil {
+		user.SchemaName = *schemaName
+	}
+	if isActive != nil {
+		user.IsActive = *isActive
+	} else {
+		user.IsActive = true
+	}
+	if waEnabled != nil {
+		user.WAEnabled = *waEnabled
+	} else {
+		user.WAEnabled = true
+	}
 	return &user, nil
 }
+
+func (r *UserRepository) GetByID(id int) (*entities.User, error) {
+	var user entities.User
+	var schemaName *string
+	var isActive, waEnabled *bool
+	err := r.db.QueryRow(context.Background(),
+		"SELECT id, username, password_hash, role, schema_name, COALESCE(is_active, true), COALESCE(wa_enabled, true) FROM users WHERE id = $1",
+		id).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &schemaName, &isActive, &waEnabled)
+	
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if schemaName != nil {
+		user.SchemaName = *schemaName
+	}
+	if isActive != nil {
+		user.IsActive = *isActive
+	} else {
+		user.IsActive = true
+	}
+	if waEnabled != nil {
+		user.WAEnabled = *waEnabled
+	} else {
+		user.WAEnabled = true
+	}
+	return &user, nil
+}
+
+func (r *UserRepository) UpdateSchemaName(userID int, schemaName string) error {
+	_, err := r.db.Exec(context.Background(),
+		"UPDATE users SET schema_name = $1 WHERE id = $2",
+		schemaName, userID)
+	return err
+}
+
+// Admin methods
+
+func (r *UserRepository) GetAllUsers() ([]UserListItem, error) {
+	rows, err := r.db.Query(context.Background(),
+		`SELECT id, username, role, COALESCE(schema_name, ''), COALESCE(is_active, true), COALESCE(wa_enabled, true), COALESCE(created_at, NOW()) 
+		 FROM users ORDER BY id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	
+	users := []UserListItem{}
+	for rows.Next() {
+		var u UserListItem
+		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.SchemaName, &u.IsActive, &u.WAEnabled, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+	return users, nil
+}
+
+func (r *UserRepository) GetStats() (*PlatformStats, error) {
+	var stats PlatformStats
+	
+	err := r.db.QueryRow(context.Background(), "SELECT COUNT(*) FROM users").Scan(&stats.TotalUsers)
+	if err != nil {
+		return nil, err
+	}
+	
+	err = r.db.QueryRow(context.Background(), "SELECT COUNT(*) FROM users WHERE COALESCE(is_active, true) = true").Scan(&stats.ActiveUsers)
+	if err != nil {
+		return nil, err
+	}
+	
+	err = r.db.QueryRow(context.Background(), "SELECT COUNT(*) FROM users WHERE COALESCE(wa_enabled, true) = true").Scan(&stats.WAEnabledUsers)
+	if err != nil {
+		return nil, err
+	}
+	
+	err = r.db.QueryRow(context.Background(), "SELECT COUNT(*) FROM users WHERE role = 'admin'").Scan(&stats.AdminCount)
+	if err != nil {
+		return nil, err
+	}
+	
+	return &stats, nil
+}
+
+func (r *UserRepository) UpdateUserStatus(userID int, isActive bool) error {
+	_, err := r.db.Exec(context.Background(),
+		"UPDATE users SET is_active = $1 WHERE id = $2",
+		isActive, userID)
+	return err
+}
+
+func (r *UserRepository) UpdateWAEnabled(userID int, enabled bool) error {
+	_, err := r.db.Exec(context.Background(),
+		"UPDATE users SET wa_enabled = $1 WHERE id = $2",
+		enabled, userID)
+	return err
+}
+

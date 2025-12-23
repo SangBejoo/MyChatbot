@@ -2,14 +2,62 @@ package http
 
 import (
 	"encoding/json"
+	"net/http"
 	"project_masAde/internal/repository"
 
 	"github.com/gin-gonic/gin"
 )
 
+// GetUserStats returns dashboard stats for the authenticated user's tenant
+func (h *Handler) GetUserStats(c *gin.Context) {
+	schema := getSchemaName(c)
+	userID, _ := getUserIDAndSchema(c)
+	
+	// Get counts from repositories
+	menus, _ := h.dashboardUsecase.GetAllMenus(schema)
+	tables, _ := h.dashboardUsecase.ListTables(schema)
+	configs, _ := h.dashboardUsecase.GetAllConfigs(schema)
+	
+	// Check WhatsApp status
+	waConnected := false
+	waPhone := ""
+	waName := ""
+	if h.waManager != nil {
+		client := h.waManager.GetClient(userID)
+		if client != nil && client.IsConnected() {
+			waConnected = true
+			waPhone = client.GetPhoneNumber()
+			waName = client.GetName()
+		}
+	}
+	
+	c.JSON(http.StatusOK, gin.H{
+		"menu_count":    len(menus),
+		"table_count":   len(tables),
+		"config_count":  len(configs),
+		"wa_connected":  waConnected,
+		"wa_phone":      waPhone,
+		"wa_name":       waName,
+		"schema_name":   schema,
+	})
+}
+
+// getSchemaName extracts schema_name from JWT context, defaults to "public"
+func getSchemaName(c *gin.Context) string {
+	schema, exists := c.Get("schema_name")
+	if !exists || schema == nil {
+		return "public"
+	}
+	if s, ok := schema.(string); ok && s != "" {
+		return s
+	}
+	return "public"
+}
+
 // Config
 func (h *Handler) GetAllConfigs(c *gin.Context) {
-	configs, err := h.dashboardUsecase.GetAllConfigs()
+	schema := getSchemaName(c)
+	configs, err := h.dashboardUsecase.GetAllConfigs(schema)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -18,6 +66,7 @@ func (h *Handler) GetAllConfigs(c *gin.Context) {
 }
 
 func (h *Handler) SetConfig(c *gin.Context) {
+	schema := getSchemaName(c)
 	var payload struct {
 		Key   string `json:"key"`
 		Value string `json:"value"`
@@ -38,7 +87,7 @@ func (h *Handler) SetConfig(c *gin.Context) {
 	}
 	payload.Value = SanitizeString(payload.Value)
 	
-	if err := h.dashboardUsecase.SetConfig(payload.Key, payload.Value); err != nil {
+	if err := h.dashboardUsecase.SetConfig(schema, payload.Key, payload.Value); err != nil {
 		c.JSON(500, gin.H{"error": "Failed to save config"})
 		return
 	}
@@ -47,7 +96,8 @@ func (h *Handler) SetConfig(c *gin.Context) {
 
 // Menus
 func (h *Handler) GetAllMenus(c *gin.Context) {
-	menus, err := h.dashboardUsecase.GetAllMenus()
+	schema := getSchemaName(c)
+	menus, err := h.dashboardUsecase.GetAllMenus(schema)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -56,12 +106,13 @@ func (h *Handler) GetAllMenus(c *gin.Context) {
 }
 
 func (h *Handler) GetMenu(c *gin.Context) {
+	schema := getSchemaName(c)
 	slug := c.Param("slug")
 	if !ValidSlug(slug) {
 		c.JSON(400, gin.H{"error": "Invalid menu slug"})
 		return
 	}
-	menu, err := h.dashboardUsecase.GetMenu(slug)
+	menu, err := h.dashboardUsecase.GetMenu(schema, slug)
 	if err != nil {
 		c.JSON(404, gin.H{"error": "Menu not found"})
 		return
@@ -70,6 +121,7 @@ func (h *Handler) GetMenu(c *gin.Context) {
 }
 
 func (h *Handler) CreateMenu(c *gin.Context) {
+	schema := getSchemaName(c)
 	var m struct {
 		Slug  string          `json:"slug"`
 		Title string          `json:"title"`
@@ -91,7 +143,7 @@ func (h *Handler) CreateMenu(c *gin.Context) {
 	}
 	m.Title = SanitizeString(m.Title)
 	
-	if err := h.dashboardUsecase.CreateMenu(&repository.Menu{Slug: m.Slug, Title: m.Title, Items: m.Items}); err != nil {
+	if err := h.dashboardUsecase.CreateMenu(schema, &repository.Menu{Slug: m.Slug, Title: m.Title, Items: m.Items}); err != nil {
 		c.JSON(500, gin.H{"error": "Failed to create menu"})
 		return
 	}
@@ -99,6 +151,7 @@ func (h *Handler) CreateMenu(c *gin.Context) {
 }
 
 func (h *Handler) UpdateMenu(c *gin.Context) {
+	schema := getSchemaName(c)
 	slug := c.Param("slug")
 	var m struct {
 		Title string          `json:"title"`
@@ -108,7 +161,7 @@ func (h *Handler) UpdateMenu(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	if err := h.dashboardUsecase.UpdateMenu(&repository.Menu{Slug: slug, Title: m.Title, Items: m.Items}); err != nil {
+	if err := h.dashboardUsecase.UpdateMenu(schema, &repository.Menu{Slug: slug, Title: m.Title, Items: m.Items}); err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
@@ -116,8 +169,9 @@ func (h *Handler) UpdateMenu(c *gin.Context) {
 }
 
 func (h *Handler) DeleteMenu(c *gin.Context) {
+	schema := getSchemaName(c)
 	slug := c.Param("slug")
-	if err := h.dashboardUsecase.DeleteMenu(slug); err != nil {
+	if err := h.dashboardUsecase.DeleteMenu(schema, slug); err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
@@ -133,7 +187,8 @@ func (h *Handler) GetAllProducts(c *gin.Context) {
 // -- Dynamic Data Handlers --
 
 func (h *Handler) ListTables(c *gin.Context) {
-	tables, err := h.dashboardUsecase.ListTables()
+	schema := getSchemaName(c)
+	tables, err := h.dashboardUsecase.ListTables(schema)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -142,12 +197,13 @@ func (h *Handler) ListTables(c *gin.Context) {
 }
 
 func (h *Handler) GetTableData(c *gin.Context) {
+	schema := getSchemaName(c)
 	name := c.Param("name")
 	if !ValidTableName(name) {
 		c.JSON(400, gin.H{"error": "Invalid table name"})
 		return
 	}
-	data, err := h.dashboardUsecase.GetTableData(name)
+	data, err := h.dashboardUsecase.GetTableData(schema, name)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to fetch data"})
 		return
@@ -156,6 +212,7 @@ func (h *Handler) GetTableData(c *gin.Context) {
 }
 
 func (h *Handler) ImportTable(c *gin.Context) {
+	schema := getSchemaName(c)
 	// Multipart form upload
 	displayName := c.PostForm("display_name")
 	if !ValidateLength(displayName, 1, MaxTitleLength) {
@@ -171,20 +228,21 @@ func (h *Handler) ImportTable(c *gin.Context) {
 	}
 	defer file.Close()
 
-	if err := h.dashboardUsecase.ImportTable(displayName, file); err != nil {
-		c.JSON(500, gin.H{"error": "Import failed"})
+	if err := h.dashboardUsecase.ImportTable(schema, displayName, file); err != nil {
+		c.JSON(500, gin.H{"error": "Import failed: " + err.Error()})
 		return
 	}
 	c.JSON(201, gin.H{"status": "imported"})
 }
 
 func (h *Handler) DeleteTable(c *gin.Context) {
+	schema := getSchemaName(c)
 	name := c.Param("name")
 	if !ValidTableName(name) {
 		c.JSON(400, gin.H{"error": "Invalid table name"})
 		return
 	}
-	if err := h.dashboardUsecase.DeleteTable(name); err != nil {
+	if err := h.dashboardUsecase.DeleteTable(schema, name); err != nil {
 		c.JSON(500, gin.H{"error": "Failed to delete table"})
 		return
 	}
@@ -192,6 +250,7 @@ func (h *Handler) DeleteTable(c *gin.Context) {
 }
 
 func (h *Handler) UpdateRow(c *gin.Context) {
+	schema := getSchemaName(c)
 	tableName := c.Param("name")
 	var payload struct {
 		RowID int                    `json:"row_id"`
@@ -201,7 +260,7 @@ func (h *Handler) UpdateRow(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	if err := h.dashboardUsecase.UpdateRow(tableName, payload.RowID, payload.Data); err != nil {
+	if err := h.dashboardUsecase.UpdateRow(schema, tableName, payload.RowID, payload.Data); err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
@@ -209,6 +268,7 @@ func (h *Handler) UpdateRow(c *gin.Context) {
 }
 
 func (h *Handler) DeleteRow(c *gin.Context) {
+	schema := getSchemaName(c)
 	tableName := c.Param("name")
 	var payload struct {
 		RowID int `json:"row_id"`
@@ -217,7 +277,7 @@ func (h *Handler) DeleteRow(c *gin.Context) {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
-	if err := h.dashboardUsecase.DeleteRow(tableName, payload.RowID); err != nil {
+	if err := h.dashboardUsecase.DeleteRow(schema, tableName, payload.RowID); err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}

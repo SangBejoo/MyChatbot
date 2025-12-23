@@ -19,6 +19,9 @@ type WhatsAppClient struct {
 	Client      *whatsmeow.Client
 	HandlerFunc func(evt interface{})
 	
+	UserID     int    // Owner user ID for multi-tenancy
+	SchemaName string // Tenant schema for data isolation
+	
 	qrCode      string
 	qrLock      sync.RWMutex
 }
@@ -44,6 +47,17 @@ func NewWhatsAppClient(dbPath string) (*WhatsAppClient, error) {
 	return &WhatsAppClient{
 		Client: client,
 	}, nil
+}
+
+// NewWhatsAppClientWithUser creates a client for a specific user (multi-tenancy)
+func NewWhatsAppClientWithUser(dbPath string, userID int, schemaName string) (*WhatsAppClient, error) {
+	client, err := NewWhatsAppClient(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	client.UserID = userID
+	client.SchemaName = schemaName
+	return client, nil
 }
 
 func (w *WhatsAppClient) Connect() error {
@@ -98,6 +112,27 @@ func (w *WhatsAppClient) GetUserInfo() (string, string) {
 		return "", ""
 	}
 	return w.Client.Store.ID.User, w.Client.Store.PushName
+}
+
+// IsConnected returns true if client is connected and logged in
+func (w *WhatsAppClient) IsConnected() bool {
+	return w.Client.IsConnected() && w.Client.Store.ID != nil
+}
+
+// GetPhoneNumber returns the connected phone number
+func (w *WhatsAppClient) GetPhoneNumber() string {
+	if w.Client.Store.ID == nil {
+		return ""
+	}
+	return w.Client.Store.ID.User
+}
+
+// GetName returns the push name of connected user
+func (w *WhatsAppClient) GetName() string {
+	if w.Client.Store.ID == nil {
+		return ""
+	}
+	return w.Client.Store.PushName
 }
 
 func (w *WhatsAppClient) Logout() error {

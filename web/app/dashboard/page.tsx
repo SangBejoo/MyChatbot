@@ -1,70 +1,213 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import api from '@/lib/api';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
-import { Users, DollarSign, Activity } from 'lucide-react';
+import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { 
+  Menu, Database, Settings, Smartphone, 
+  ArrowRight, CheckCircle, XCircle, Loader2,
+  TrendingUp, Zap
+} from 'lucide-react';
+
+interface DashboardStats {
+  menu_count: number;
+  table_count: number;
+  config_count: number;
+  wa_connected: boolean;
+  wa_phone: string;
+  wa_name: string;
+  schema_name: string;
+}
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState<any>(null);
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     api.get('/dashboard/stats')
       .then(res => setStats(res.data))
-      .catch(console.error);
+      .catch(console.error)
+      .finally(() => setLoading(false));
   }, []);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-[60vh]">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      <h2 className="text-3xl font-bold tracking-tight">Overview</h2>
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-3xl font-bold tracking-tight">Dashboard</h2>
+          <p className="text-gray-500">Welcome to your bot management portal</p>
+        </div>
+        <div className="text-right">
+          <p className="text-xs text-gray-400">Tenant Schema</p>
+          <code className="text-sm bg-gray-100 px-2 py-1 rounded font-mono">{stats?.schema_name}</code>
+        </div>
+      </div>
       
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card>
+      {/* Stats Cards */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {/* Menus */}
+        <Card className="hover:shadow-lg transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium text-gray-600">Bot Menus</CardTitle>
+            <Menu className="h-5 w-5 text-blue-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">$45,231.89</div>
-            <p className="text-xs text-muted-foreground">+20.1% from last month</p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Users</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">+2350</div>
-            <p className="text-xs text-muted-foreground">+180.1% from last month</p>
+            <div className="text-3xl font-bold">{stats?.menu_count || 0}</div>
+            <p className="text-xs text-gray-400 mt-1">Interactive menu configurations</p>
+            <Link href="/dashboard/menus">
+              <Button variant="link" className="p-0 h-auto mt-2 text-blue-600">
+                Manage <ArrowRight className="h-3 w-3 ml-1" />
+              </Button>
+            </Link>
           </CardContent>
         </Card>
 
-        <Card>
+        {/* Datasets */}
+        <Card className="hover:shadow-lg transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">System Status</CardTitle>
-            <Activity className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium text-gray-600">Datasets</CardTitle>
+            <Database className="h-5 w-5 text-emerald-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">Healthy</div>
-            <p className="text-xs text-muted-foreground">Up for 24 days</p>
+            <div className="text-3xl font-bold">{stats?.table_count || 0}</div>
+            <p className="text-xs text-gray-400 mt-1">Data tables uploaded</p>
+            <Link href="/dashboard/data">
+              <Button variant="link" className="p-0 h-auto mt-2 text-emerald-600">
+                View Data <ArrowRight className="h-3 w-3 ml-1" />
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+
+        {/* Configs */}
+        <Card className="hover:shadow-lg transition-shadow">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-gray-600">Configurations</CardTitle>
+            <Settings className="h-5 w-5 text-purple-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold">{stats?.config_count || 0}</div>
+            <p className="text-xs text-gray-400 mt-1">Bot settings configured</p>
+            <Link href="/dashboard/settings">
+              <Button variant="link" className="p-0 h-auto mt-2 text-purple-600">
+                Configure <ArrowRight className="h-3 w-3 ml-1" />
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+
+        {/* WhatsApp Status */}
+        <Card className={`hover:shadow-lg transition-shadow ${stats?.wa_connected ? 'ring-2 ring-green-200' : ''}`}>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-gray-600">WhatsApp</CardTitle>
+            <Smartphone className={`h-5 w-5 ${stats?.wa_connected ? 'text-green-500' : 'text-gray-400'}`} />
+          </CardHeader>
+          <CardContent>
+            {stats?.wa_connected ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="h-5 w-5 text-green-500" />
+                  <span className="text-lg font-bold text-green-700">Connected</span>
+                </div>
+                <p className="text-xs text-gray-500 mt-1 font-mono">+{stats.wa_phone}</p>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-2">
+                  <XCircle className="h-5 w-5 text-gray-400" />
+                  <span className="text-lg font-medium text-gray-500">Not Connected</span>
+                </div>
+                <p className="text-xs text-gray-400 mt-1">Connect your WhatsApp</p>
+              </>
+            )}
+            <Link href="/dashboard/whatsapp">
+              <Button variant="link" className="p-0 h-auto mt-2 text-blue-600">
+                {stats?.wa_connected ? 'Manage' : 'Connect'} <ArrowRight className="h-3 w-3 ml-1" />
+              </Button>
+            </Link>
           </CardContent>
         </Card>
       </div>
 
-      <div className="mt-8">
+      {/* Quick Actions */}
+      <div className="grid gap-6 md:grid-cols-2">
         <Card>
-            <CardHeader>
-                <CardTitle>Recent Activity</CardTitle>
-            </CardHeader>
-            <CardContent>
-               <div className="h-[200px] flex items-center justify-center border-dashed border-2 rounded bg-gray-50 text-gray-400">
-                    Chart Placeholder
-               </div>
-            </CardContent>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Zap className="h-5 w-5 text-yellow-500" />
+              Quick Actions
+            </CardTitle>
+            <CardDescription>Common tasks to manage your bot</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3">
+            <Link href="/dashboard/menus">
+              <Button variant="outline" className="w-full justify-start">
+                <Menu className="h-4 w-4 mr-2" /> Create New Menu
+              </Button>
+            </Link>
+            <Link href="/dashboard/data">
+              <Button variant="outline" className="w-full justify-start">
+                <Database className="h-4 w-4 mr-2" /> Upload Dataset (CSV)
+              </Button>
+            </Link>
+            <Link href="/dashboard/whatsapp">
+              <Button variant="outline" className="w-full justify-start">
+                <Smartphone className="h-4 w-4 mr-2" /> 
+                {stats?.wa_connected ? 'View WhatsApp Status' : 'Connect WhatsApp'}
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <TrendingUp className="h-5 w-5 text-blue-500" />
+              System Overview
+            </CardTitle>
+            <CardDescription>Your bot infrastructure status</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <div className="h-3 w-3 rounded-full bg-green-500 animate-pulse" />
+                  <span className="font-medium">Bot Engine</span>
+                </div>
+                <span className="text-sm text-green-600">Online</span>
+              </div>
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <div className={`h-3 w-3 rounded-full ${stats?.wa_connected ? 'bg-green-500 animate-pulse' : 'bg-gray-300'}`} />
+                  <span className="font-medium">WhatsApp Service</span>
+                </div>
+                <span className={`text-sm ${stats?.wa_connected ? 'text-green-600' : 'text-gray-400'}`}>
+                  {stats?.wa_connected ? 'Connected' : 'Disconnected'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <div className="h-3 w-3 rounded-full bg-green-500 animate-pulse" />
+                  <span className="font-medium">Database</span>
+                </div>
+                <span className="text-sm text-green-600">Healthy</span>
+              </div>
+            </div>
+          </CardContent>
         </Card>
       </div>
     </div>
   );
 }
+

@@ -46,11 +46,11 @@ export default function MenuManagerPage() {
         try {
             const { data } = await api.get('/menus');
             // Backend sends "items" as interface{}, need to ensure it's array
-            const formatted = data.map((m: any) => ({
+            const formatted = (data || []).map((m: any) => ({
                 ...m,
                 items: Array.isArray(m.items) ? m.items : [] 
             }));
-            setMenus(formatted || []);
+            setMenus(formatted);
         } catch (error) {
             console.error('Failed to fetch menus', error);
         } finally {

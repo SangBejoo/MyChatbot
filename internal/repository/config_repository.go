@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -37,10 +38,19 @@ func NewConfigRepository(db *pgxpool.Pool) *ConfigRepository {
 	return &ConfigRepository{db: db}
 }
 
-// GetConfig returns a config value by key
-func (r *ConfigRepository) GetConfig(key string) (string, error) {
+// qualifyConfigTable returns schema-qualified table name
+func qualifyConfigTable(schema, table string) string {
+	if schema == "" || schema == "public" {
+		return table
+	}
+	return fmt.Sprintf("%s.%s", schema, table)
+}
+
+// GetConfig returns a config value by key (schema-aware)
+func (r *ConfigRepository) GetConfig(schemaName, key string) (string, error) {
+	table := qualifyConfigTable(schemaName, "bot_config")
 	var value string
-	err := r.db.QueryRow(context.Background(), "SELECT value FROM bot_config WHERE key=$1", key).Scan(&value)
+	err := r.db.QueryRow(context.Background(), fmt.Sprintf("SELECT value FROM %s WHERE key=$1", table), key).Scan(&value)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return "", nil // Not found is not strictly an error
@@ -50,25 +60,27 @@ func (r *ConfigRepository) GetConfig(key string) (string, error) {
 	return value, nil
 }
 
-// SetConfig sets a config value
-func (r *ConfigRepository) SetConfig(key, value string) error {
-	_, err := r.db.Exec(context.Background(), `
-		INSERT INTO bot_config (key, value, updated_at) 
+// SetConfig sets a config value (schema-aware)
+func (r *ConfigRepository) SetConfig(schemaName, key, value string) error {
+	table := qualifyConfigTable(schemaName, "bot_config")
+	_, err := r.db.Exec(context.Background(), fmt.Sprintf(`
+		INSERT INTO %s (key, value, updated_at) 
 		VALUES ($1, $2, NOW())
 		ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()
-	`, key, value)
+	`, table), key, value)
 	return err
 }
 
-// GetAllConfigs returns all configs
-func (r *ConfigRepository) GetAllConfigs() ([]BotConfig, error) {
-	rows, err := r.db.Query(context.Background(), "SELECT key, value, updated_at FROM bot_config")
+// GetAllConfigs returns all configs (schema-aware)
+func (r *ConfigRepository) GetAllConfigs(schemaName string) ([]BotConfig, error) {
+	table := qualifyConfigTable(schemaName, "bot_config")
+	rows, err := r.db.Query(context.Background(), fmt.Sprintf("SELECT key, value, updated_at FROM %s", table))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var configs []BotConfig
+	configs := []BotConfig{}
 	for rows.Next() {
 		var c BotConfig
 		if err := rows.Scan(&c.Key, &c.Value, &c.UpdatedAt); err != nil {
@@ -79,48 +91,53 @@ func (r *ConfigRepository) GetAllConfigs() ([]BotConfig, error) {
 	return configs, nil
 }
 
-// GetMenu returns a menu by slug
-func (r *ConfigRepository) GetMenu(slug string) (*Menu, error) {
+// GetMenu returns a menu by slug (schema-aware)
+func (r *ConfigRepository) GetMenu(schemaName, slug string) (*Menu, error) {
+	table := qualifyConfigTable(schemaName, "menus")
 	var m Menu
-	err := r.db.QueryRow(context.Background(), "SELECT id, slug, title, items, created_at FROM menus WHERE slug=$1", slug).Scan(&m.ID, &m.Slug, &m.Title, &m.Items, &m.CreatedAt)
+	err := r.db.QueryRow(context.Background(), fmt.Sprintf("SELECT id, slug, title, items, created_at FROM %s WHERE slug=$1", table), slug).Scan(&m.ID, &m.Slug, &m.Title, &m.Items, &m.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
 	return &m, nil
 }
 
-// CreateMenu creates a new menu
-func (r *ConfigRepository) CreateMenu(m *Menu) error {
-	return r.db.QueryRow(context.Background(), `
-		INSERT INTO menus (slug, title, items, created_at)
+// CreateMenu creates a new menu (schema-aware)
+func (r *ConfigRepository) CreateMenu(schemaName string, m *Menu) error {
+	table := qualifyConfigTable(schemaName, "menus")
+	return r.db.QueryRow(context.Background(), fmt.Sprintf(`
+		INSERT INTO %s (slug, title, items, created_at)
 		VALUES ($1, $2, $3, NOW())
 		RETURNING id
-	`, m.Slug, m.Title, m.Items).Scan(&m.ID)
+	`, table), m.Slug, m.Title, m.Items).Scan(&m.ID)
 }
 
-// UpdateMenu updates an existing menu
-func (r *ConfigRepository) UpdateMenu(m *Menu) error {
-	_, err := r.db.Exec(context.Background(), `
-		UPDATE menus SET title=$1, items=$2 WHERE slug=$3
-	`, m.Title, m.Items, m.Slug)
+// UpdateMenu updates an existing menu (schema-aware)
+func (r *ConfigRepository) UpdateMenu(schemaName string, m *Menu) error {
+	table := qualifyConfigTable(schemaName, "menus")
+	_, err := r.db.Exec(context.Background(), fmt.Sprintf(`
+		UPDATE %s SET title=$1, items=$2 WHERE slug=$3
+	`, table), m.Title, m.Items, m.Slug)
 	return err
 }
 
-// DeleteMenu deletes a menu
-func (r *ConfigRepository) DeleteMenu(slug string) error {
-	_, err := r.db.Exec(context.Background(), "DELETE FROM menus WHERE slug=$1", slug)
+// DeleteMenu deletes a menu (schema-aware)
+func (r *ConfigRepository) DeleteMenu(schemaName, slug string) error {
+	table := qualifyConfigTable(schemaName, "menus")
+	_, err := r.db.Exec(context.Background(), fmt.Sprintf("DELETE FROM %s WHERE slug=$1", table), slug)
 	return err
 }
 
-// GetAllMenus list all menus (lightweight)
-func (r *ConfigRepository) GetAllMenus() ([]Menu, error) {
-	rows, err := r.db.Query(context.Background(), "SELECT id, slug, title, items, created_at FROM menus")
+// GetAllMenus list all menus (schema-aware)
+func (r *ConfigRepository) GetAllMenus(schemaName string) ([]Menu, error) {
+	table := qualifyConfigTable(schemaName, "menus")
+	rows, err := r.db.Query(context.Background(), fmt.Sprintf("SELECT id, slug, title, items, created_at FROM %s", table))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var menus []Menu
+	menus := []Menu{}
 	for rows.Next() {
 		var m Menu
 		if err := rows.Scan(&m.ID, &m.Slug, &m.Title, &m.Items, &m.CreatedAt); err != nil {

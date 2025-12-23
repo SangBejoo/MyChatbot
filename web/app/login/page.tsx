@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import api from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,7 +26,18 @@ export default function LoginPage() {
       const { data } = await api.post('/auth/login', { username, password });
       if (data.token) {
         localStorage.setItem('token', data.token);
-        router.push('/dashboard');
+        
+        // Decode JWT to get role (JWT is base64 encoded)
+        try {
+          const payload = JSON.parse(atob(data.token.split('.')[1]));
+          if (payload.role === 'admin') {
+            router.push('/dashboard/admin');
+          } else {
+            router.push('/dashboard');
+          }
+        } catch {
+          router.push('/dashboard');
+        }
       } else {
         setError('Login failed. No token received.');
       }
@@ -72,8 +84,14 @@ export default function LoginPage() {
             </Button>
           </form>
         </CardContent>
-        <CardFooter className="justify-center text-xs text-gray-500">
-          Protected System &copy; 2024
+        <CardFooter className="flex flex-col gap-2">
+          <div className="text-sm text-gray-500">
+            Don't have an account?{' '}
+            <Link href="/register" className="text-primary font-medium hover:underline">
+              Register
+            </Link>
+          </div>
+          <div className="text-xs text-gray-400">Protected System © 2024</div>
         </CardFooter>
       </Card>
     </div>

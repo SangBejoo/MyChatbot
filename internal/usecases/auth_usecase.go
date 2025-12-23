@@ -12,14 +12,16 @@ import (
 )
 
 type AuthUsecase struct {
-	userRepo  *repository.UserRepository
-	jwtSecret []byte
+	userRepo      *repository.UserRepository
+	tenantManager *repository.TenantManager
+	jwtSecret     []byte
 }
 
-func NewAuthUsecase(repo *repository.UserRepository, secret string) *AuthUsecase {
+func NewAuthUsecase(repo *repository.UserRepository, tenantMgr *repository.TenantManager, secret string) *AuthUsecase {
 	return &AuthUsecase{
-		userRepo:  repo,
-		jwtSecret: []byte(secret),
+		userRepo:      repo,
+		tenantManager: tenantMgr,
+		jwtSecret:     []byte(secret),
 	}
 }
 
@@ -40,10 +42,27 @@ func (uc *AuthUsecase) Register(username, password string) error {
 	user := &entities.User{
 		Username:     username,
 		PasswordHash: string(hashed),
-		Role:         "user", // Default
+		Role:         "user",
 	}
 
-	return uc.userRepo.Create(user)
+	// Create user first to get ID
+	userID, err := uc.userRepo.Create(user)
+	if err != nil {
+		return fmt.Errorf("failed to create user: %w", err)
+	}
+
+	// Create tenant schema
+	schemaName, err := uc.tenantManager.CreateTenantSchema(userID)
+	if err != nil {
+		return fmt.Errorf("failed to create tenant schema: %w", err)
+	}
+
+	// Update user with schema name
+	if err := uc.userRepo.UpdateSchemaName(userID, schemaName); err != nil {
+		return fmt.Errorf("failed to update schema name: %w", err)
+	}
+
+	return nil
 }
 
 func (uc *AuthUsecase) Login(username, password string) (string, error) {
@@ -60,11 +79,12 @@ func (uc *AuthUsecase) Login(username, password string) (string, error) {
 		return "", errors.New("invalid credentials")
 	}
 
-	// Generate JWT
+	// Generate JWT with schema_name for multi-tenancy
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id": user.ID,
-		"role":    user.Role,
-		"exp":     time.Now().Add(time.Hour * 24).Unix(),
+		"user_id":     user.ID,
+		"role":        user.Role,
+		"schema_name": user.SchemaName,
+		"exp":         time.Now().Add(time.Hour * 24).Unix(),
 	})
 
 	tokenString, err := token.SignedString(uc.jwtSecret)
@@ -87,8 +107,10 @@ func (uc *AuthUsecase) EnsureAdmin(username, password string) error {
 			Username:     username,
 			PasswordHash: string(hashed),
 			Role:         "admin",
+			SchemaName:   "public", // Admin uses public schema
 		}
-		return uc.userRepo.Create(admin)
+		_, err := uc.userRepo.Create(admin)
+		return err
 	}
 	return nil
 }
