@@ -115,7 +115,11 @@ type TelegramClient struct {
 }
 
 func NewTelegramClient(token string) interfaces.Messenger {
-	bot, _ := tgbotapi.NewBotAPI(token)
+	bot, err := tgbotapi.NewBotAPI(token)
+	if err != nil {
+		fmt.Printf("Warning: Telegram Bot Token issue: %v. Telegram features disabled.\n", err)
+		return &TelegramClient{Bot: nil}
+	}
 	return &TelegramClient{Bot: bot}
 }
 

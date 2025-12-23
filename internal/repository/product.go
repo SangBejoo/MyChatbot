@@ -1,10 +1,14 @@
 package repository
 
 import (
+	"context"
 	"encoding/csv"
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Product struct {
@@ -18,17 +22,17 @@ type Product struct {
 }
 
 type ProductRepository struct {
-	products []Product
+	db *pgxpool.Pool
 }
 
-func NewProductRepository() *ProductRepository {
+func NewProductRepository(db *pgxpool.Pool) *ProductRepository {
 	return &ProductRepository{
-		products: []Product{},
+		db: db,
 	}
 }
 
-// LoadFromCSV loads products from a CSV file
-func (r *ProductRepository) LoadFromCSV(filePath string) error {
+// SyncFromCSV loads products from a CSV file and upserts them into Postgres
+func (r *ProductRepository) SyncFromCSV(filePath string) error {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to open CSV: %w", err)
@@ -41,18 +45,34 @@ func (r *ProductRepository) LoadFromCSV(filePath string) error {
 		return fmt.Errorf("failed to read CSV: %w", err)
 	}
 
+	ctx := context.Background()
+
 	// Skip header row
 	for i := 1; i < len(records); i++ {
 		if len(records[i]) >= 7 {
-			r.products = append(r.products, Product{
-				ID:       records[i][0],
-				Name:     records[i][1],
-				Category: records[i][2],
-				Type:     records[i][3],
-				Price:    records[i][4],
-				Currency: records[i][5],
-				Details:  records[i][6],
-			})
+			code := records[i][0]
+			name := records[i][1]
+			category := records[i][2]
+			pType := records[i][3]
+			price := records[i][4]
+			currency := records[i][5]
+			details := records[i][6]
+
+			_, err := r.db.Exec(ctx, `
+				INSERT INTO products (code, name, category, description, type, raw_price, currency) 
+				VALUES ($1, $2, $3, $4, $5, $6, $7)
+				ON CONFLICT (code) DO UPDATE 
+				SET name = EXCLUDED.name, 
+				    category = EXCLUDED.category, 
+					description = EXCLUDED.description,
+					type = EXCLUDED.type,
+					raw_price = EXCLUDED.raw_price,
+					currency = EXCLUDED.currency;
+			`, code, name, category, details, pType, price, currency)
+			
+			if err != nil {
+				fmt.Printf("Failed to sync product %s: %v\n", code, err)
+			}
 		}
 	}
 	return nil
@@ -60,65 +80,83 @@ func (r *ProductRepository) LoadFromCSV(filePath string) error {
 
 // GetByCategory returns all products in a category
 func (r *ProductRepository) GetByCategory(category string) []Product {
-	var filtered []Product
-	for _, p := range r.products {
-		if strings.EqualFold(p.Category, category) {
-			filtered = append(filtered, p)
-		}
+	rows, err := r.db.Query(context.Background(), "SELECT code, name, category, description, type, raw_price, currency FROM products WHERE category ILIKE $1", category)
+	if err != nil {
+		return []Product{}
 	}
-	return filtered
+	defer rows.Close()
+
+	return scanProducts(rows)
 }
 
 // GetByType returns all products of a type (export/import)
 func (r *ProductRepository) GetByType(typeStr string) []Product {
-	var filtered []Product
-	for _, p := range r.products {
-		if strings.EqualFold(p.Type, typeStr) {
-			filtered = append(filtered, p)
-		}
+	rows, err := r.db.Query(context.Background(), "SELECT code, name, category, description, type, raw_price, currency FROM products WHERE type ILIKE $1", typeStr)
+	if err != nil {
+		return []Product{}
 	}
-	return filtered
+	defer rows.Close()
+	return scanProducts(rows)
 }
 
 // GetByTypeAndCategory returns filtered products
 func (r *ProductRepository) GetByTypeAndCategory(typeStr, category string) []Product {
-	var filtered []Product
-	for _, p := range r.products {
-		if strings.EqualFold(p.Type, typeStr) && strings.EqualFold(p.Category, category) {
-			filtered = append(filtered, p)
-		}
+	rows, err := r.db.Query(context.Background(), "SELECT code, name, category, description, type, raw_price, currency FROM products WHERE type ILIKE $1 AND category ILIKE $2", typeStr, category)
+	if err != nil {
+		return []Product{}
 	}
-	return filtered
+	defer rows.Close()
+	return scanProducts(rows)
 }
 
 // GetAllCategories returns unique categories
 func (r *ProductRepository) GetAllCategories() []string {
-	categoryMap := make(map[string]bool)
-	for _, p := range r.products {
-		categoryMap[p.Category] = true
+	rows, err := r.db.Query(context.Background(), "SELECT DISTINCT category FROM products")
+	if err != nil {
+		return []string{}
 	}
-	var categories []string
-	for cat := range categoryMap {
-		categories = append(categories, cat)
+	defer rows.Close()
+	var cats []string
+	for rows.Next() {
+		var c string
+		rows.Scan(&c)
+		cats = append(cats, c)
 	}
-	return categories
+	return cats
 }
 
 // SearchByName searches products by name
 func (r *ProductRepository) SearchByName(query string) []Product {
-	var filtered []Product
-	query = strings.ToLower(query)
-	for _, p := range r.products {
-		if strings.Contains(strings.ToLower(p.Name), query) {
-			filtered = append(filtered, p)
-		}
+	rows, err := r.db.Query(context.Background(), "SELECT code, name, category, description, type, raw_price, currency FROM products WHERE name ILIKE $1", "%"+query+"%")
+	if err != nil {
+		return []Product{}
 	}
-	return filtered
+	defer rows.Close()
+	return scanProducts(rows)
 }
 
 // GetAllProducts returns all products
 func (r *ProductRepository) GetAllProducts() []Product {
-	return r.products
+	rows, err := r.db.Query(context.Background(), "SELECT code, name, category, description, type, raw_price, currency FROM products")
+	if err != nil {
+		return []Product{}
+	}
+	defer rows.Close()
+	return scanProducts(rows)
+}
+
+func scanProducts(rows pgx.Rows) []Product {
+	var products []Product
+	for rows.Next() {
+		var p Product
+		// We use pointers to handles potentially null fields if DB allows, but schema text says NOT NULL usually.
+		// Scan directly
+		err := rows.Scan(&p.ID, &p.Name, &p.Category, &p.Details, &p.Type, &p.Price, &p.Currency)
+		if err == nil {
+			products = append(products, p)
+		}
+	}
+	return products
 }
 
 // FormatAsContext returns products formatted for AI context

@@ -1,8 +1,41 @@
 package http
 
 import (
+	"project_masAde/internal/repository"
+
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
+
+// GenerateDynamicKeyboard creates keyboard from dynamic menu items
+func GenerateDynamicKeyboard(items []repository.MenuItem) tgbotapi.InlineKeyboardMarkup {
+	var rows [][]tgbotapi.InlineKeyboardButton
+	
+	// Create 2 buttons per row for better mobile layout
+	var row []tgbotapi.InlineKeyboardButton
+	for i, item := range items {
+		// Callback data format: "action_" + Action + "_" + Payload (max 64 chars)
+		// To save space, let's use: "a:" + Action + ":" + Payload? 
+		// Or if Action is "view_table", payload is "dt_...". 
+		// Our Callback handler expects "action_", "cat_", "type_".
+		// We need to update main.go handler to be generic. 
+		// For now, let's format data as "dyn:" + item.Action + ":" + item.Payload
+		
+		btnData := "dyn:" + item.Action + ":" + item.Payload
+		
+		btn := tgbotapi.NewInlineKeyboardButtonData(item.Label, btnData)
+		row = append(row, btn)
+
+		if (i+1)%2 == 0 {
+			rows = append(rows, row)
+			row = []tgbotapi.InlineKeyboardButton{}
+		}
+	}
+	if len(row) > 0 {
+		rows = append(rows, row)
+	}
+
+	return tgbotapi.NewInlineKeyboardMarkup(rows...)
+}
 
 // CreateCategoryKeyboard creates inline keyboard buttons for product categories
 func CreateCategoryKeyboard() tgbotapi.InlineKeyboardMarkup {
