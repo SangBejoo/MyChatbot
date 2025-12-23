@@ -23,11 +23,23 @@ func (h *Handler) SetConfig(c *gin.Context) {
 		Value string `json:"value"`
 	}
 	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		c.JSON(400, gin.H{"error": "Invalid request body"})
 		return
 	}
+	
+	// Input validation
+	if !ValidConfigKey(payload.Key) {
+		c.JSON(400, gin.H{"error": "Invalid config key"})
+		return
+	}
+	if !ValidateLength(payload.Value, 0, MaxConfigValLength) {
+		c.JSON(400, gin.H{"error": "Config value too long"})
+		return
+	}
+	payload.Value = SanitizeString(payload.Value)
+	
 	if err := h.dashboardUsecase.SetConfig(payload.Key, payload.Value); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		c.JSON(500, gin.H{"error": "Failed to save config"})
 		return
 	}
 	c.JSON(200, gin.H{"status": "updated"})
@@ -45,6 +57,10 @@ func (h *Handler) GetAllMenus(c *gin.Context) {
 
 func (h *Handler) GetMenu(c *gin.Context) {
 	slug := c.Param("slug")
+	if !ValidSlug(slug) {
+		c.JSON(400, gin.H{"error": "Invalid menu slug"})
+		return
+	}
 	menu, err := h.dashboardUsecase.GetMenu(slug)
 	if err != nil {
 		c.JSON(404, gin.H{"error": "Menu not found"})
@@ -60,12 +76,23 @@ func (h *Handler) CreateMenu(c *gin.Context) {
 		Items json.RawMessage `json:"items"`
 	}
 	if err := c.ShouldBindJSON(&m); err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		c.JSON(400, gin.H{"error": "Invalid request body"})
 		return
 	}
-	// Map to Entity
+	
+	// Validate inputs
+	if !ValidSlug(m.Slug) {
+		c.JSON(400, gin.H{"error": "Invalid slug format"})
+		return
+	}
+	if !ValidateLength(m.Title, 1, MaxTitleLength) {
+		c.JSON(400, gin.H{"error": "Invalid title length"})
+		return
+	}
+	m.Title = SanitizeString(m.Title)
+	
 	if err := h.dashboardUsecase.CreateMenu(&repository.Menu{Slug: m.Slug, Title: m.Title, Items: m.Items}); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		c.JSON(500, gin.H{"error": "Failed to create menu"})
 		return
 	}
 	c.JSON(201, gin.H{"status": "created"})
@@ -116,9 +143,13 @@ func (h *Handler) ListTables(c *gin.Context) {
 
 func (h *Handler) GetTableData(c *gin.Context) {
 	name := c.Param("name")
+	if !ValidTableName(name) {
+		c.JSON(400, gin.H{"error": "Invalid table name"})
+		return
+	}
 	data, err := h.dashboardUsecase.GetTableData(name)
 	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		c.JSON(500, gin.H{"error": "Failed to fetch data"})
 		return
 	}
 	c.JSON(200, data)
@@ -127,6 +158,12 @@ func (h *Handler) GetTableData(c *gin.Context) {
 func (h *Handler) ImportTable(c *gin.Context) {
 	// Multipart form upload
 	displayName := c.PostForm("display_name")
+	if !ValidateLength(displayName, 1, MaxTitleLength) {
+		c.JSON(400, gin.H{"error": "Invalid display name"})
+		return
+	}
+	displayName = SanitizeString(displayName)
+	
 	file, _, err := c.Request.FormFile("file")
 	if err != nil {
 		c.JSON(400, gin.H{"error": "Bad request: missing file"})
@@ -135,7 +172,7 @@ func (h *Handler) ImportTable(c *gin.Context) {
 	defer file.Close()
 
 	if err := h.dashboardUsecase.ImportTable(displayName, file); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		c.JSON(500, gin.H{"error": "Import failed"})
 		return
 	}
 	c.JSON(201, gin.H{"status": "imported"})
@@ -143,8 +180,12 @@ func (h *Handler) ImportTable(c *gin.Context) {
 
 func (h *Handler) DeleteTable(c *gin.Context) {
 	name := c.Param("name")
+	if !ValidTableName(name) {
+		c.JSON(400, gin.H{"error": "Invalid table name"})
+		return
+	}
 	if err := h.dashboardUsecase.DeleteTable(name); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
+		c.JSON(500, gin.H{"error": "Failed to delete table"})
 		return
 	}
 	c.JSON(200, gin.H{"status": "deleted"})

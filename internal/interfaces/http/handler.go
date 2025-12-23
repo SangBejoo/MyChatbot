@@ -24,7 +24,9 @@ func NewHandler(service *usecases.MessageService, dashboard *usecases.DashboardU
 func SetupRoutes(r *gin.Engine, service *usecases.MessageService, auth *usecases.AuthUsecase, dashboard *usecases.DashboardUsecase, middleware *Middleware) {
 	h := NewHandler(service, dashboard)
 	
-	// Apply CORS
+	// Apply Security Middleware
+	r.Use(SecurityHeaders())
+	r.Use(RequestSizeLimiter(10 << 20)) // 10MB max request size
 	r.Use(middleware.CORSMiddleware())
 	
 	// Public Routes

@@ -100,3 +100,29 @@ func (m *Middleware) CORSMiddleware() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// SecurityHeaders adds security headers to prevent common attacks
+func SecurityHeaders() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Prevent MIME type sniffing
+		c.Writer.Header().Set("X-Content-Type-Options", "nosniff")
+		// Prevent clickjacking
+		c.Writer.Header().Set("X-Frame-Options", "DENY")
+		// XSS Protection (legacy but still useful)
+		c.Writer.Header().Set("X-XSS-Protection", "1; mode=block")
+		// Referrer policy
+		c.Writer.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		// Content Security Policy (basic)
+		c.Writer.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'")
+		
+		c.Next()
+	}
+}
+
+// RequestSizeLimiter limits request body size to prevent DoS
+func RequestSizeLimiter(maxBytes int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+		c.Next()
+	}
+}
