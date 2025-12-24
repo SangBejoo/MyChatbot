@@ -21,13 +21,15 @@ type PlatformStats struct {
 }
 
 type UserListItem struct {
-	ID         int       `json:"id"`
-	Username   string    `json:"username"`
-	Role       string    `json:"role"`
-	SchemaName string    `json:"schema_name"`
-	IsActive   bool      `json:"is_active"`
-	WAEnabled  bool      `json:"wa_enabled"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID           int       `json:"id"`
+	Username     string    `json:"username"`
+	Role         string    `json:"role"`
+	SchemaName   string    `json:"schema_name"`
+	IsActive     bool      `json:"is_active"`
+	WAEnabled    bool      `json:"wa_enabled"`
+	CreatedAt    time.Time `json:"created_at"`
+	DailyLimit   int       `json:"daily_limit"`
+	MonthlyLimit int       `json:"monthly_limit"`
 }
 
 func NewUserRepository(db *pgxpool.Pool) *UserRepository {
@@ -46,9 +48,13 @@ func (r *UserRepository) GetByUsername(username string) (*entities.User, error) 
 	var user entities.User
 	var schemaName *string
 	var isActive, waEnabled *bool
+	var dailyLimit, monthlyLimit *int
 	err := r.db.QueryRow(context.Background(),
-		"SELECT id, username, password_hash, role, schema_name, COALESCE(is_active, true), COALESCE(wa_enabled, true) FROM users WHERE username = $1",
-		username).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &schemaName, &isActive, &waEnabled)
+		`SELECT id, username, password_hash, role, schema_name, 
+		 COALESCE(is_active, true), COALESCE(wa_enabled, true),
+		 COALESCE(daily_limit, 200), COALESCE(monthly_limit, 5000)
+		 FROM users WHERE username = $1`,
+		username).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &schemaName, &isActive, &waEnabled, &dailyLimit, &monthlyLimit)
 	
 	if err == pgx.ErrNoRows {
 		return nil, nil
@@ -68,6 +74,16 @@ func (r *UserRepository) GetByUsername(username string) (*entities.User, error) 
 		user.WAEnabled = *waEnabled
 	} else {
 		user.WAEnabled = true
+	}
+	if dailyLimit != nil {
+		user.DailyLimit = *dailyLimit
+	} else {
+		user.DailyLimit = 200
+	}
+	if monthlyLimit != nil {
+		user.MonthlyLimit = *monthlyLimit
+	} else {
+		user.MonthlyLimit = 5000
 	}
 	return &user, nil
 }
@@ -76,9 +92,13 @@ func (r *UserRepository) GetByID(id int) (*entities.User, error) {
 	var user entities.User
 	var schemaName *string
 	var isActive, waEnabled *bool
+	var dailyLimit, monthlyLimit *int
 	err := r.db.QueryRow(context.Background(),
-		"SELECT id, username, password_hash, role, schema_name, COALESCE(is_active, true), COALESCE(wa_enabled, true) FROM users WHERE id = $1",
-		id).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &schemaName, &isActive, &waEnabled)
+		`SELECT id, username, password_hash, role, schema_name, 
+		 COALESCE(is_active, true), COALESCE(wa_enabled, true),
+		 COALESCE(daily_limit, 200), COALESCE(monthly_limit, 5000)
+		 FROM users WHERE id = $1`,
+		id).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &schemaName, &isActive, &waEnabled, &dailyLimit, &monthlyLimit)
 	
 	if err == pgx.ErrNoRows {
 		return nil, nil
@@ -98,6 +118,16 @@ func (r *UserRepository) GetByID(id int) (*entities.User, error) {
 		user.WAEnabled = *waEnabled
 	} else {
 		user.WAEnabled = true
+	}
+	if dailyLimit != nil {
+		user.DailyLimit = *dailyLimit
+	} else {
+		user.DailyLimit = 200
+	}
+	if monthlyLimit != nil {
+		user.MonthlyLimit = *monthlyLimit
+	} else {
+		user.MonthlyLimit = 5000
 	}
 	return &user, nil
 }
@@ -113,7 +143,7 @@ func (r *UserRepository) UpdateSchemaName(userID int, schemaName string) error {
 
 func (r *UserRepository) GetAllUsers() ([]UserListItem, error) {
 	rows, err := r.db.Query(context.Background(),
-		`SELECT id, username, role, COALESCE(schema_name, ''), COALESCE(is_active, true), COALESCE(wa_enabled, true), COALESCE(created_at, NOW()) 
+		`SELECT id, username, role, COALESCE(schema_name, ''), COALESCE(is_active, true), COALESCE(wa_enabled, true), COALESCE(created_at, NOW()), COALESCE(daily_limit, 200), COALESCE(monthly_limit, 5000) 
 		 FROM users ORDER BY id DESC`)
 	if err != nil {
 		return nil, err
@@ -123,7 +153,7 @@ func (r *UserRepository) GetAllUsers() ([]UserListItem, error) {
 	users := []UserListItem{}
 	for rows.Next() {
 		var u UserListItem
-		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.SchemaName, &u.IsActive, &u.WAEnabled, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.SchemaName, &u.IsActive, &u.WAEnabled, &u.CreatedAt, &u.DailyLimit, &u.MonthlyLimit); err != nil {
 			return nil, err
 		}
 		users = append(users, u)
@@ -168,6 +198,13 @@ func (r *UserRepository) UpdateWAEnabled(userID int, enabled bool) error {
 	_, err := r.db.Exec(context.Background(),
 		"UPDATE users SET wa_enabled = $1 WHERE id = $2",
 		enabled, userID)
+	return err
+}
+
+func (r *UserRepository) UpdateUserLimits(userID int, dailyLimit, monthlyLimit int) error {
+	_, err := r.db.Exec(context.Background(),
+		"UPDATE users SET daily_limit = $1, monthly_limit = $2 WHERE id = $3",
+		dailyLimit, monthlyLimit, userID)
 	return err
 }
 

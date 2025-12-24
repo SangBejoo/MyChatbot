@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { 
     Users, Activity, Smartphone, Shield, 
     Loader2, Power, PowerOff, Wifi, WifiOff,
-    RefreshCw, TrendingUp
+    RefreshCw, TrendingUp, Edit2, Check, X
 } from 'lucide-react';
 
 interface Stats {
@@ -28,6 +28,8 @@ interface User {
     wa_enabled: boolean;
     wa_connected: boolean;
     created_at: string;
+    daily_limit: number;
+    monthly_limit: number;
 }
 
 export default function AdminDashboardPage() {
@@ -35,6 +37,7 @@ export default function AdminDashboardPage() {
     const [users, setUsers] = useState<User[]>([]);
     const [loading, setLoading] = useState(true);
     const [actionLoading, setActionLoading] = useState<number | null>(null);
+    const [editingLimits, setEditingLimits] = useState<{userId: number, daily: number, monthly: number} | null>(null);
 
     const fetchStats = async () => {
         try {
@@ -93,6 +96,23 @@ export default function AdminDashboardPage() {
             fetchStats();
         } catch (error: any) {
             alert(error.response?.data?.error || 'Failed to disconnect');
+        } finally {
+            setActionLoading(null);
+        }
+    };
+
+    const updateLimits = async () => {
+        if (!editingLimits) return;
+        setActionLoading(editingLimits.userId);
+        try {
+            await api.put(`/admin/users/${editingLimits.userId}/limits`, {
+                daily_limit: editingLimits.daily,
+                monthly_limit: editingLimits.monthly
+            });
+            setEditingLimits(null);
+            fetchUsers();
+        } catch (error: any) {
+            alert(error.response?.data?.error || 'Failed to update limits');
         } finally {
             setActionLoading(null);
         }
@@ -242,6 +262,7 @@ export default function AdminDashboardPage() {
                                     <th className="text-left p-3 font-medium">Schema</th>
                                     <th className="text-left p-3 font-medium">Status</th>
                                     <th className="text-left p-3 font-medium">WhatsApp</th>
+                                    <th className="text-left p-3 font-medium">Limits</th>
                                     <th className="text-left p-3 font-medium">Actions</th>
                                 </tr>
                             </thead>
@@ -286,6 +307,51 @@ export default function AdminDashboardPage() {
                                                     </span>
                                                 )}
                                             </div>
+                                        </td>
+                                        <td className="p-3">
+                                            {editingLimits?.userId === user.id ? (
+                                                <div className="flex items-center gap-2">
+                                                    <div className="flex flex-col gap-1">
+                                                        <input
+                                                            type="number"
+                                                            value={editingLimits.daily}
+                                                            onChange={(e) => setEditingLimits({...editingLimits, daily: parseInt(e.target.value) || 0})}
+                                                            className="w-20 px-2 py-1 text-xs border rounded"
+                                                            placeholder="Daily"
+                                                        />
+                                                        <input
+                                                            type="number"
+                                                            value={editingLimits.monthly}
+                                                            onChange={(e) => setEditingLimits({...editingLimits, monthly: parseInt(e.target.value) || 0})}
+                                                            className="w-20 px-2 py-1 text-xs border rounded"
+                                                            placeholder="Monthly"
+                                                        />
+                                                    </div>
+                                                    <div className="flex flex-col gap-1">
+                                                        <Button variant="ghost" size="sm" onClick={updateLimits} className="h-6 w-6 p-0">
+                                                            <Check className="h-3 w-3 text-green-600" />
+                                                        </Button>
+                                                        <Button variant="ghost" size="sm" onClick={() => setEditingLimits(null)} className="h-6 w-6 p-0">
+                                                            <X className="h-3 w-3 text-red-500" />
+                                                        </Button>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <div className="flex items-center gap-2">
+                                                    <div className="text-xs">
+                                                        <div>{user.daily_limit}/day</div>
+                                                        <div className="text-gray-400">{user.monthly_limit}/mo</div>
+                                                    </div>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onClick={() => setEditingLimits({userId: user.id, daily: user.daily_limit, monthly: user.monthly_limit})}
+                                                        className="h-6 w-6 p-0"
+                                                    >
+                                                        <Edit2 className="h-3 w-3 text-gray-400" />
+                                                    </Button>
+                                                </div>
+                                            )}
                                         </td>
                                         <td className="p-3">
                                             <div className="flex items-center gap-1">

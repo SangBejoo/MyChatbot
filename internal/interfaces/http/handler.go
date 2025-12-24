@@ -1,6 +1,7 @@
 package http
 
 import (
+	"fmt"
 	"net/http"
 	"project_masAde/internal/entities"
 	"project_masAde/internal/infrastructure"
@@ -15,18 +16,22 @@ type Handler struct {
 	messageService   *usecases.MessageService
 	dashboardUsecase *usecases.DashboardUsecase
 	waManager        *infrastructure.WhatsAppManager
+	usageRepo        *repository.UsageRepository
+	userRepo         *repository.UserRepository
 }
 
-func NewHandler(service *usecases.MessageService, dashboard *usecases.DashboardUsecase, waManager *infrastructure.WhatsAppManager) *Handler {
+func NewHandler(service *usecases.MessageService, dashboard *usecases.DashboardUsecase, waManager *infrastructure.WhatsAppManager, usageRepo *repository.UsageRepository, userRepo *repository.UserRepository) *Handler {
 	return &Handler{
 		messageService:   service,
 		dashboardUsecase: dashboard,
 		waManager:        waManager,
+		usageRepo:        usageRepo,
+		userRepo:         userRepo,
 	}
 }
 
-func SetupRoutes(r *gin.Engine, service *usecases.MessageService, auth *usecases.AuthUsecase, dashboard *usecases.DashboardUsecase, waManager *infrastructure.WhatsAppManager, userRepo *repository.UserRepository, middleware *Middleware) {
-	h := NewHandler(service, dashboard, waManager)
+func SetupRoutes(r *gin.Engine, service *usecases.MessageService, auth *usecases.AuthUsecase, dashboard *usecases.DashboardUsecase, waManager *infrastructure.WhatsAppManager, userRepo *repository.UserRepository, usageRepo *repository.UsageRepository, middleware *Middleware) {
+	h := NewHandler(service, dashboard, waManager, usageRepo, userRepo)
 	adminHandler := NewAdminHandler(userRepo, waManager)
 	
 	// Apply Security Middleware
@@ -124,6 +129,7 @@ func SetupRoutes(r *gin.Engine, service *usecases.MessageService, auth *usecases
 		admin.GET("/users", adminHandler.GetAllUsers)
 		admin.PUT("/users/:id/status", adminHandler.UpdateUserStatus)
 		admin.PUT("/users/:id/whatsapp", adminHandler.UpdateWAEnabled)
+		admin.PUT("/users/:id/limits", adminHandler.UpdateUserLimits)
 		admin.POST("/users/:id/disconnect-wa", adminHandler.DisconnectUserWA)
 	}
 }
@@ -263,13 +269,14 @@ func (h *Handler) LogoutUserWhatsApp(c *gin.Context) {
 	}
 	
 	if h.waManager == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "WhatsApp not configured"})
+		c.JSON(http.StatusOK, gin.H{"status": "logged_out", "message": "WhatsApp not configured"})
 		return
 	}
 	
+	// Attempt logout - errors are logged but not returned to user
 	if err := h.waManager.LogoutClient(userID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		// Log the error but return success to user (already logged out)
+		fmt.Printf("WhatsApp logout warning for user %d: %v\n", userID, err)
 	}
 	
 	c.JSON(http.StatusOK, gin.H{"status": "logged_out"})

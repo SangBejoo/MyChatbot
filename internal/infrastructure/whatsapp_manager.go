@@ -89,16 +89,35 @@ func (m *WhatsAppManager) DisconnectClient(userID int) {
 }
 
 // LogoutClient logs out user's WhatsApp (clears session, shows new QR)
+// Returns nil if client doesn't exist or already logged out (graceful handling)
 func (m *WhatsAppManager) LogoutClient(userID int) error {
 	m.mu.RLock()
 	client, exists := m.clients[userID]
 	m.mu.RUnlock()
 	
+	// No client = already logged out, return success
 	if !exists || client == nil {
-		return fmt.Errorf("no WhatsApp client for user %d", userID)
+		return nil
 	}
 	
-	return client.Logout()
+	// Check if already disconnected
+	if !client.IsLoggedIn() && !client.Client.IsConnected() {
+		// Clean up the client from map
+		m.mu.Lock()
+		delete(m.clients, userID)
+		m.mu.Unlock()
+		return nil
+	}
+	
+	// Attempt logout, ignore errors from already-disconnected state
+	err := client.Logout()
+	
+	// Clean up client from map regardless of logout result
+	m.mu.Lock()
+	delete(m.clients, userID)
+	m.mu.Unlock()
+	
+	return err
 }
 
 // GetAllConnectedUsers returns list of userIDs with active connections

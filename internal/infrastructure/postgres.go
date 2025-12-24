@@ -68,6 +68,25 @@ func (p *PostgresClient) Migrate() error {
 	_, _ = p.Pool.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS schema_name VARCHAR(128)`)
 	_, _ = p.Pool.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE`)
 	_, _ = p.Pool.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS wa_enabled BOOLEAN DEFAULT TRUE`)
+	_, _ = p.Pool.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_limit INT DEFAULT 200`)
+	_, _ = p.Pool.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS monthly_limit INT DEFAULT 5000`)
+
+	// Message Usage Tracking Table
+	_, err = p.Pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS message_usage (
+			id SERIAL PRIMARY KEY,
+			user_id INT NOT NULL,
+			date DATE NOT NULL,
+			messages_sent INT DEFAULT 0,
+			messages_received INT DEFAULT 0,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(user_id, date)
+		);
+		CREATE INDEX IF NOT EXISTS idx_message_usage_user_date ON message_usage(user_id, date);
+	`)
+	if err != nil {
+		fmt.Printf("Warning: message_usage table creation: %v\n", err)
+	}
 
 	// Products Table (replacing CSV)
 	_, err = p.Pool.Exec(ctx, `

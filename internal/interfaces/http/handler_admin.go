@@ -64,14 +64,16 @@ func (h *AdminHandler) GetAllUsers(c *gin.Context) {
 	result := make([]gin.H, len(users))
 	for i, u := range users {
 		result[i] = gin.H{
-			"id":          u.ID,
-			"username":    u.Username,
-			"role":        u.Role,
-			"schema_name": u.SchemaName,
-			"is_active":   u.IsActive,
-			"wa_enabled":  u.WAEnabled,
-			"wa_connected": connectedUsers[u.ID],
-			"created_at":  u.CreatedAt,
+			"id":            u.ID,
+			"username":      u.Username,
+			"role":          u.Role,
+			"schema_name":   u.SchemaName,
+			"is_active":     u.IsActive,
+			"wa_enabled":    u.WAEnabled,
+			"wa_connected":  connectedUsers[u.ID],
+			"created_at":    u.CreatedAt,
+			"daily_limit":   u.DailyLimit,
+			"monthly_limit": u.MonthlyLimit,
 		}
 	}
 	
@@ -154,3 +156,39 @@ func (h *AdminHandler) DisconnectUserWA(c *gin.Context) {
 	h.waManager.DisconnectClient(userID)
 	c.JSON(http.StatusOK, gin.H{"status": "disconnected"})
 }
+
+// UpdateUserLimits sets message quotas for a user
+func (h *AdminHandler) UpdateUserLimits(c *gin.Context) {
+	userID, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		return
+	}
+	
+	var payload struct {
+		DailyLimit   int `json:"daily_limit"`
+		MonthlyLimit int `json:"monthly_limit"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+	
+	// Validate limits
+	if payload.DailyLimit < 0 || payload.MonthlyLimit < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Limits cannot be negative"})
+		return
+	}
+	
+	if err := h.userRepo.UpdateUserLimits(userID, payload.DailyLimit, payload.MonthlyLimit); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update limits"})
+		return
+	}
+	
+	c.JSON(http.StatusOK, gin.H{
+		"status":        "updated",
+		"daily_limit":   payload.DailyLimit,
+		"monthly_limit": payload.MonthlyLimit,
+	})
+}
+

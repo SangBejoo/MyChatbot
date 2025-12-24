@@ -31,7 +31,22 @@ func (h *Handler) GetUserStats(c *gin.Context) {
 		}
 	}
 	
-	c.JSON(http.StatusOK, gin.H{
+	// Get user quota limits
+	user, _ := h.userRepo.GetByID(userID)
+	dailyLimit := 200
+	monthlyLimit := 5000
+	if user != nil {
+		dailyLimit = user.DailyLimit
+		monthlyLimit = user.MonthlyLimit
+	}
+	
+	// Get quota usage stats
+	var quotaStats *repository.UserQuotaStatus
+	if h.usageRepo != nil {
+		quotaStats, _ = h.usageRepo.GetQuotaStatus(userID, dailyLimit, monthlyLimit)
+	}
+	
+	response := gin.H{
 		"menu_count":    len(menus),
 		"table_count":   len(tables),
 		"config_count":  len(configs),
@@ -39,7 +54,14 @@ func (h *Handler) GetUserStats(c *gin.Context) {
 		"wa_phone":      waPhone,
 		"wa_name":       waName,
 		"schema_name":   schema,
-	})
+	}
+	
+	// Add quota info if available
+	if quotaStats != nil {
+		response["quota"] = quotaStats
+	}
+	
+	c.JSON(http.StatusOK, response)
 }
 
 // getSchemaName extracts schema_name from JWT context, defaults to "public"

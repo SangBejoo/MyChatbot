@@ -10,6 +10,7 @@ import (
 	"project_masAde/internal/usecases"
 	"strconv"
 	"strings"
+	"time"
 
 	"fmt"
 
@@ -66,9 +67,12 @@ func main() {
 	dashboardUsecase := usecases.NewDashboardUsecase(configRepo, repo, tableManager)
 	authMiddleware := http.NewMiddleware(os.Getenv("JWT_SECRET"))
 
-	// Initialize session manager & pricing
 	sessionManager := infrastructure.NewSessionManager()
 	pricingCalc := usecases.NewPricingCalculator(repo)
+
+	// Initialize message rate limiter and usage tracking
+	rateLimiter := infrastructure.NewMessageRateLimiter(1.0, 5) // 1 msg/sec, burst 5
+	usageRepo := repository.NewUsageRepository(pgClient.Pool)
 
 	// Initialize WhatsApp Manager (per-user clients)
 	waManager := infrastructure.NewWhatsAppManager("devices")
@@ -85,13 +89,46 @@ func main() {
 				
 				sender, content := client.ParseMessage(v)
 				
+				// Skip if message is from self or empty
+				if sender == "" || content == "" {
+					return
+				}
+				
 				// Ignore group messages
 				if v.Info.IsGroup {
 					return
 				}
 				
+				// DEBUG: Log who we're replying to
+				fmt.Printf("[WA] Message from: %s, content: '%s'\n", sender, content)
+				
+				// Track received message
+				usageRepo.IncrementReceived(userID)
+				
+				// Check quota before sending response
+				user, err := userRepo.GetByID(userID)
+				if err != nil || user == nil {
+					fmt.Printf("Error getting user %d: %v\n", userID, err)
+					return
+				}
+				
+				canSend, reason := usageRepo.CanSendMessage(userID, user.DailyLimit, user.MonthlyLimit)
+				if !canSend {
+					client.SendMessage(sender, "⚠️ "+reason+"\n\nYour message quota has been reached. Please contact support or wait for quota reset.")
+					return
+				}
+				
+				// Check rate limit
+				if !rateLimiter.Allow(userID) {
+					waitTime := rateLimiter.WaitTime(userID)
+					if waitTime > 0 {
+						time.Sleep(waitTime)
+					}
+				}
+				
 				// Handle regular text menu selection
 				if content == "1" || strings.Contains(strings.ToLower(content), "calculate") {
+					usageRepo.IncrementSent(userID)
 					client.SendMessage(sender, "📝 Enter product details:\n\nFormat: *30 tumbler 30kg*\n\n(quantity product weight)")
 					return
 				}
@@ -100,6 +137,7 @@ func main() {
 				if strings.Contains(content, "kg") || strings.Contains(content, "g") {
 					parsed := pricingCalc.ParseQuery(content)
 					result := pricingCalc.CalculatePrice(parsed)
+					usageRepo.IncrementSent(userID)
 					client.SendMessage(sender, result+"\n\nReply with *1* to calculate again.")
 					return
 				}
@@ -125,7 +163,7 @@ func main() {
 
 	// Setup HTTP server
 	r := gin.Default()
-	http.SetupRoutes(r, messageService, authUsecase, dashboardUsecase, waManager, userRepo, authMiddleware)
+	http.SetupRoutes(r, messageService, authUsecase, dashboardUsecase, waManager, userRepo, usageRepo, authMiddleware)
 	go func() {
 		if err := r.Run("0.0.0.0:8080"); err != nil {
 			fmt.Printf("FAILED to start HTTP Server: %v\n", err)

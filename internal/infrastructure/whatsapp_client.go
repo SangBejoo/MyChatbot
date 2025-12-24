@@ -27,9 +27,16 @@ type WhatsAppClient struct {
 }
 
 func NewWhatsAppClient(dbPath string) (*WhatsAppClient, error) {
-	// Initialize SQLite container
-	dbLog := waLog.Stdout("Database", "DEBUG", true)
-	container, err := sqlstore.New(context.Background(), "sqlite", "file:"+dbPath+"?_pragma=foreign_keys(1)", dbLog)
+	// Initialize SQLite container with WAL mode and busy timeout to prevent SQLITE_BUSY errors
+	dbLog := waLog.Stdout("Database", "ERROR", true) // Reduced log level
+	
+	// SQLite pragmas for better concurrency:
+	// - journal_mode=WAL: Write-Ahead Logging for concurrent reads/writes
+	// - busy_timeout=5000: Wait 5 seconds before giving up on locked DB
+	// - synchronous=NORMAL: Good balance of safety and speed
+	dbURI := fmt.Sprintf("file:%s?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)", dbPath)
+	
+	container, err := sqlstore.New(context.Background(), "sqlite", dbURI, dbLog)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %v", err)
 	}
@@ -40,8 +47,8 @@ func NewWhatsAppClient(dbPath string) (*WhatsAppClient, error) {
 		return nil, fmt.Errorf("failed to get device: %v", err)
 	}
 
-	// Create client with standard logging
-	clientLog := waLog.Stdout("Client", "DEBUG", true)
+	// Create client with reduced logging
+	clientLog := waLog.Stdout("Client", "WARN", true) // Reduced from DEBUG
 	client := whatsmeow.NewClient(deviceStore, clientLog)
 
 	return &WhatsAppClient{
@@ -202,16 +209,26 @@ func (w *WhatsAppClient) SendPresence(to string) {
 	w.Client.SendChatPresence(context.Background(), jid, types.ChatPresenceComposing, types.ChatPresenceMediaText)
 }
 
-// Convert event-based message to domain entity
+// ParseMessage converts event-based message to sender and content
+// Returns empty strings if message should be ignored (e.g., sent by self)
 func (w *WhatsAppClient) ParseMessage(evt *events.Message) (string, string) {
-	sender := evt.Info.Sender.User // The phone number
-	var content string
+	// IMPORTANT: Ignore messages sent by the bot itself
+	if evt.Info.IsFromMe {
+		return "", ""
+	}
 	
+	// Use Chat JID for reply (not Sender) - this ensures we reply to the correct chat
+	// For private chats: Chat = sender's JID
+	// For groups: Chat = group JID (but we ignore groups anyway)
+	replyTo := evt.Info.Chat.User
+	
+	var content string
 	if evt.Message.Conversation != nil {
 		content = *evt.Message.Conversation
 	} else if evt.Message.ExtendedTextMessage != nil {
 		content = *evt.Message.ExtendedTextMessage.Text
 	}
 	
-	return sender, content
+	return replyTo, content
 }
+

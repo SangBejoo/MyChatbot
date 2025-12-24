@@ -8,8 +8,19 @@ import { Button } from '@/components/ui/button';
 import { 
   Menu, Database, Settings, Smartphone, 
   ArrowRight, CheckCircle, XCircle, Loader2,
-  TrendingUp, Zap
+  TrendingUp, Zap, MessageSquare
 } from 'lucide-react';
+
+interface QuotaStatus {
+  daily_limit: number;
+  monthly_limit: number;
+  today_sent: number;
+  month_sent: number;
+  daily_remaining: number;
+  monthly_remaining: number;
+  daily_percent: number;
+  monthly_percent: number;
+}
 
 interface DashboardStats {
   menu_count: number;
@@ -19,6 +30,7 @@ interface DashboardStats {
   wa_phone: string;
   wa_name: string;
   schema_name: string;
+  quota?: QuotaStatus;
 }
 
 export default function DashboardPage() {
@@ -139,6 +151,72 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Message Quota */}
+      {stats?.quota && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <MessageSquare className="h-5 w-5 text-blue-500" />
+              Message Quota
+            </CardTitle>
+            <CardDescription>Your WhatsApp message usage and limits</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-6 md:grid-cols-2">
+              {/* Daily Usage */}
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="font-medium">Daily Usage</span>
+                  <span className={stats.quota.daily_percent >= 80 ? 'text-red-600 font-medium' : 'text-gray-500'}>
+                    {stats.quota.today_sent} / {stats.quota.daily_limit}
+                  </span>
+                </div>
+                <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full rounded-full transition-all ${
+                      stats.quota.daily_percent >= 80 ? 'bg-red-500' : 
+                      stats.quota.daily_percent >= 50 ? 'bg-yellow-500' : 'bg-green-500'
+                    }`}
+                    style={{ width: `${Math.min(stats.quota.daily_percent, 100)}%` }}
+                  />
+                </div>
+                <p className="text-xs text-gray-400">
+                  {stats.quota.daily_remaining > 0 
+                    ? `${stats.quota.daily_remaining} messages remaining today`
+                    : '⚠️ Daily limit reached'
+                  }
+                </p>
+              </div>
+
+              {/* Monthly Usage */}
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="font-medium">Monthly Usage</span>
+                  <span className={stats.quota.monthly_percent >= 80 ? 'text-red-600 font-medium' : 'text-gray-500'}>
+                    {stats.quota.month_sent} / {stats.quota.monthly_limit}
+                  </span>
+                </div>
+                <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full rounded-full transition-all ${
+                      stats.quota.monthly_percent >= 80 ? 'bg-red-500' : 
+                      stats.quota.monthly_percent >= 50 ? 'bg-yellow-500' : 'bg-green-500'
+                    }`}
+                    style={{ width: `${Math.min(stats.quota.monthly_percent, 100)}%` }}
+                  />
+                </div>
+                <p className="text-xs text-gray-400">
+                  {stats.quota.monthly_remaining > 0 
+                    ? `${stats.quota.monthly_remaining} messages remaining this month`
+                    : '⚠️ Monthly limit reached'
+                  }
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Quick Actions */}
       <div className="grid gap-6 md:grid-cols-2">
