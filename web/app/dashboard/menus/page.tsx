@@ -6,8 +6,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Menu, Plus, Trash2, Save, Loader2, GripVertical } from 'lucide-react';
+import { Menu, Plus, Trash2, Save, Loader2, GripVertical, Eye, EyeOff } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import TelegramPreview from '@/components/TelegramPreview';
 
 interface MenuItem {
     label: string;
@@ -36,6 +37,7 @@ export default function MenuManagerPage() {
     // Create/Edit State
     const [editingMenu, setEditingMenu] = useState<MenuDTO | null>(null);
     const [isCreateOpen, setIsCreateOpen] = useState(false);
+    const [showPreview, setShowPreview] = useState(true);
     
     // New Menu State
     const [newSlug, setNewSlug] = useState('');
@@ -129,9 +131,9 @@ export default function MenuManagerPage() {
         const newItems = [...editingMenu.items];
         newItems[index] = { ...newItems[index], [field]: value };
         
-        // Reset payload if action changes to view_table to force selection
-        if (field === 'action' && value === 'view_table') {
-             newItems[index].payload = tables.length > 0 ? tables[0].table_name : '';
+        // Reset payload if action changes to view_table or calculate_from_table to force selection
+        if (field === 'action' && (value === 'view_table' || value === 'calculate_from_table')) {
+             newItems[index].payload = tables.length > 0 ? tables[0].display_name : '';
         }
         
         setEditingMenu({ ...editingMenu, items: newItems });
@@ -157,6 +159,11 @@ export default function MenuManagerPage() {
                     <p className="text-gray-500">Design your bot's buttons and interactions</p>
                 </div>
                 
+                <div className="flex gap-2">
+                    <Button variant="outline" onClick={() => setShowPreview(!showPreview)}>
+                        {showPreview ? <EyeOff className="mr-2 h-4 w-4" /> : <Eye className="mr-2 h-4 w-4" />}
+                        {showPreview ? 'Hide Preview' : 'Show Preview'}
+                    </Button>
                 <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
                     <DialogTrigger asChild>
                         <Button>
@@ -191,6 +198,7 @@ export default function MenuManagerPage() {
                         </div>
                     </DialogContent>
                 </Dialog>
+                </div>
             </div>
 
             <div className="grid gap-6 md:grid-cols-12 h-[calc(100vh-200px)]">
@@ -216,8 +224,8 @@ export default function MenuManagerPage() {
                     ))}
                 </div>
 
-                {/* Editor - 8 Cols */}
-                <Card className="md:col-span-8 flex flex-col h-full overflow-hidden">
+                {/* Editor - Adjusts based on preview visibility */}
+                <Card className={`${showPreview ? 'md:col-span-5' : 'md:col-span-8'} flex flex-col h-full overflow-hidden transition-all`}>
                     <CardHeader className="border-b bg-gray-50/50">
                         <div className="flex justify-between items-center">
                             <CardTitle>
@@ -292,7 +300,7 @@ export default function MenuManagerPage() {
                                                     <label className="text-xs font-medium text-gray-500 mb-1 block">Action Type</label>
                                                     <div className="flex gap-2">
                                                         <Select 
-                                                            value={['reply', 'view_table'].includes(item.action) ? item.action : '_custom'} 
+                                                            value={['reply', 'view_table', 'calculate_from_table'].includes(item.action) ? item.action : '_custom'} 
                                                             onValueChange={(val) => {
                                                                 if (val === '_custom') {
                                                                     updateItem(idx, 'action', '');
@@ -307,10 +315,11 @@ export default function MenuManagerPage() {
                                                             <SelectContent>
                                                                 <SelectItem value="reply">💬 Send Reply</SelectItem>
                                                                 <SelectItem value="view_table">📊 View Dataset</SelectItem>
+                                                                <SelectItem value="calculate_from_table">🧮 Calculate from Dataset</SelectItem>
                                                                 <SelectItem value="_custom">✏️ Custom...</SelectItem>
                                                             </SelectContent>
                                                         </Select>
-                                                        {!['reply', 'view_table'].includes(item.action) && (
+                                                        {!['reply', 'view_table', 'calculate_from_table'].includes(item.action) && (
                                                             <Input 
                                                                 value={item.action}
                                                                 onChange={(e) => updateItem(idx, 'action', e.target.value)}
@@ -385,6 +394,19 @@ export default function MenuManagerPage() {
                         )}
                     </CardContent>
                 </Card>
+
+                {/* Telegram Preview - 3 Cols */}
+                {showPreview && (
+                    <div className="md:col-span-3 flex flex-col gap-4">
+                        <div className="text-sm font-medium text-gray-600 flex items-center gap-2">
+                            <Eye className="h-4 w-4" /> Live Preview
+                        </div>
+                        <TelegramPreview 
+                            menuTitle={editingMenu?.title || 'Welcome! 👋'}
+                            items={editingMenu?.items || []}
+                        />
+                    </div>
+                )}
             </div>
         </div>
     );

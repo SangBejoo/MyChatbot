@@ -35,17 +35,10 @@ func main() {
 	defer pgClient.Close()
 	
 	// Initialize Repositories
-	repo := repository.NewProductRepository(pgClient.Pool)
 	userRepo := repository.NewUserRepository(pgClient.Pool)
 	configRepo := repository.NewConfigRepository(pgClient.Pool)
 	tableManager := repository.NewTableManager(pgClient.Pool)
 	tenantManager := repository.NewTenantManager(pgClient.Pool)
-
-	// Sync Data
-	err = repo.SyncFromCSV("data/products.csv")
-	if err != nil {
-		fmt.Println("Warning: Failed to sync products from CSV:", err)
-	}
 	
 	// Initialize Usecases & Services
 	authUsecase := usecases.NewAuthUsecase(userRepo, tenantManager, os.Getenv("JWT_SECRET"))
@@ -55,20 +48,23 @@ func main() {
 		fmt.Println("Warning: Failed to ensure admin user:", err)
 	}
 
-	geminiClient := infrastructure.NewGeminiClient(os.Getenv("GEMINI_API_KEY"))
+	// AI removed - handled by separate microservice
+	// See: AI Service project for AI integration
 	telegramClient := infrastructure.NewTelegramClient(os.Getenv("TELEGRAM_BOT_TOKEN"))
 	
-	messageService := usecases.NewMessageService(geminiClient, telegramClient, configRepo, tableManager)
-	messageService.ProductRepo = repo
+	messageService := usecases.NewMessageService(telegramClient, configRepo, tableManager)
 	if tc, ok := telegramClient.(*infrastructure.TelegramClient); ok {
 		messageService.TelegramClient = tc
 	}
 
-	dashboardUsecase := usecases.NewDashboardUsecase(configRepo, repo, tableManager)
+	dashboardUsecase := usecases.NewDashboardUsecase(configRepo, tableManager)
 	authMiddleware := http.NewMiddleware(os.Getenv("JWT_SECRET"))
 
 	sessionManager := infrastructure.NewSessionManager()
-	pricingCalc := usecases.NewPricingCalculator(repo)
+	dynamicCalc := usecases.NewDynamicCalculator(tableManager)
+	
+	// User state for calculation flow (chatID -> pending calculation table)
+	calcPendingTable := make(map[int64]string)
 
 	// Initialize message rate limiter and usage tracking
 	rateLimiter := infrastructure.NewMessageRateLimiter(1.0, 5) // 1 msg/sec, burst 5
@@ -133,10 +129,10 @@ func main() {
 					return
 				}
 				
-				// Pricing calculation check
+				// Dynamic calculation check - use datasets
 				if strings.Contains(content, "kg") || strings.Contains(content, "g") {
-					parsed := pricingCalc.ParseQuery(content)
-					result := pricingCalc.CalculatePrice(parsed)
+					// Use dynamic calculator with default dataset
+					result := dynamicCalc.CalculateFromInput(schemaName, "products", content)
 					usageRepo.IncrementSent(userID)
 					client.SendMessage(sender, result+"\n\nReply with *1* to calculate again.")
 					return
@@ -151,7 +147,6 @@ func main() {
 				}
 				
 				client.SendPresence(sender)
-				msg.AIContext = repo.FormatAsContext(repo.GetAllProducts())
 				
 				// Create tenant-aware service copy
 				tenantService := *messageService
@@ -163,7 +158,11 @@ func main() {
 
 	// Setup HTTP server
 	r := gin.Default()
-	http.SetupRoutes(r, messageService, authUsecase, dashboardUsecase, waManager, userRepo, usageRepo, authMiddleware)
+	
+	// Initialize TelegramBotManager for per-user bots
+	tgManager := infrastructure.NewTelegramBotManager(configRepo, tableManager)
+	
+	http.SetupRoutes(r, messageService, authUsecase, dashboardUsecase, waManager, tgManager, userRepo, usageRepo, authMiddleware)
 	go func() {
 		if err := r.Run("0.0.0.0:8080"); err != nil {
 			fmt.Printf("FAILED to start HTTP Server: %v\n", err)
@@ -220,28 +219,30 @@ func main() {
 			}
 
 			// Regular text message
+			
+			// Check if user has pending calculation from dataset
+			if tableName, hasPending := calcPendingTable[chatID]; hasPending {
+				// Process calculation from dataset
+				result := dynamicCalc.CalculateFromInput("public", tableName, update.Message.Text)
+				
+				msgText := tgbotapi.NewMessage(chatID, result)
+				msgText.ParseMode = "Markdown"
+				followUpKeyboard := http.CreateFollowUpMenu()
+				msgText.ReplyMarkup = &followUpKeyboard
+				bot.Send(msgText)
+				
+				// Clear pending state
+				delete(calcPendingTable, chatID)
+				continue
+			}
+			
 			msg := entities.Message{
 				From:     strconv.FormatInt(update.Message.Chat.ID, 10),
 				Content:  update.Message.Text,
 				Platform: "telegram",
-				AIContext: repo.FormatAsContext(repo.GetAllProducts()),
 			}
 			
-			// Check if this is a calculation request (format: "30 tumbler 30kg")
-			if strings.Contains(update.Message.Text, "kg") || strings.Contains(update.Message.Text, "g") {
-				// Try to parse as pricing query
-				parsed := pricingCalc.ParseQuery(update.Message.Text)
-				result := pricingCalc.CalculatePrice(parsed)
-				
-				// Send calculation result with follow-up menu
-				msgText := tgbotapi.NewMessage(chatID, result)
-				followUpKeyboard := http.CreateFollowUpMenu()
-				msgText.ReplyMarkup = &followUpKeyboard
-				msgText.ParseMode = "Markdown"
-				bot.Send(msgText)
-				continue
-			}
-			
+			// Legacy weight-based calculation removed - use menu buttons with calculate_from_table action instead
 			// Regular AI query with context
 			go messageService.ProcessMessageWithContext(msg)
 		}
@@ -304,6 +305,14 @@ func main() {
 					case "reply":
 						bot.Send(tgbotapi.NewMessage(chatID, payload))
 						continue
+						
+					case "calculate_from_table":
+						// Store pending calculation state
+						calcPendingTable[chatID] = payload
+						msgText := tgbotapi.NewMessage(chatID, "📝 *Masukkan detail perhitungan:*\n\nFormat: `jumlah nama_produk`\nContoh: `30 tumbler` atau `50 gelas 5kg`")
+						msgText.ParseMode = "Markdown"
+						bot.Send(msgText)
+						continue
 					}
 				}
 			}
@@ -347,7 +356,7 @@ func main() {
 			bot.Request(tgbotapi.NewCallback(update.CallbackQuery.ID, ""))
 
 			// Edit message to show loading state
-			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "⏳ Loading products...")
+			editMsg := tgbotapi.NewEditMessageText(chatID, messageID, "⏳ Loading...")
 			bot.Send(editMsg)
 
 			var categoryFilter, typeFilter string
@@ -359,25 +368,16 @@ func main() {
 				typeFilter = strings.TrimPrefix(callbackData, "type_")
 			}
 
-			// Get filtered products
-			var products []repository.Product
-			if categoryFilter != "" && typeFilter != "" {
-				products = repo.GetByTypeAndCategory(typeFilter, categoryFilter)
-			} else if categoryFilter != "" {
-				products = repo.GetByCategory(categoryFilter)
-			} else if typeFilter != "" {
-				products = repo.GetByType(typeFilter)
+			// Legacy product table removed - show message to use datasets
+			filterDesc := categoryFilter + typeFilter
+			if filterDesc == "" {
+				filterDesc = "products"
 			}
-
-			// Format context and send to AI
-			context := repo.FormatAsContext(products)
-			userMessage := "Show me " + categoryFilter + typeFilter + " products with pricing and details. Keep response concise."
-
+			
 			msg := entities.Message{
 				From:       strconv.FormatInt(chatID, 10),
-				Content:    userMessage,
+				Content:    "Show me " + filterDesc + " with pricing and details.",
 				Platform:   "telegram",
-				AIContext:  context,
 				IsCallback: true,
 			}
 

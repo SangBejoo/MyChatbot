@@ -208,3 +208,26 @@ func (r *UserRepository) UpdateUserLimits(userID int, dailyLimit, monthlyLimit i
 	return err
 }
 
+// UpdateTelegramToken updates user's Telegram bot token
+func (r *UserRepository) UpdateTelegramToken(userID int, token string) error {
+	_, err := r.db.Exec(context.Background(),
+		"UPDATE users SET telegram_token = $1 WHERE id = $2",
+		token, userID)
+	return err
+}
+
+// GetTelegramToken returns user's Telegram bot token
+func (r *UserRepository) GetTelegramToken(userID int) (string, error) {
+	var token *string
+	err := r.db.QueryRow(context.Background(),
+		"SELECT telegram_token FROM users WHERE id = $1",
+		userID).Scan(&token)
+	if err != nil {
+		return "", err
+	}
+	if token == nil {
+		return "", nil
+	}
+	return *token, nil
+}
+

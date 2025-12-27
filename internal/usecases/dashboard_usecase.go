@@ -7,21 +7,20 @@ import (
 
 type DashboardUsecase struct {
 	configRepo   *repository.ConfigRepository
-	productRepo  *repository.ProductRepository
 	tableManager *repository.TableManager
 }
 
-func NewDashboardUsecase(configRepo *repository.ConfigRepository, productRepo *repository.ProductRepository, tableManager *repository.TableManager) *DashboardUsecase {
+func NewDashboardUsecase(configRepo *repository.ConfigRepository, tableManager *repository.TableManager) *DashboardUsecase {
 	return &DashboardUsecase{
 		configRepo:   configRepo,
-		productRepo:  productRepo,
 		tableManager: tableManager,
 	}
 }
 
-// Product Management (shared across tenants - uses public schema)
+// Product Management - DEPRECATED: Use dynamic datasets instead
+// GetAllProducts returns empty - migrate to dynamic tables
 func (u *DashboardUsecase) GetAllProducts() []repository.Product {
-	return u.productRepo.GetAllProducts()
+	return []repository.Product{}
 }
 
 // Config Management (tenant-aware)

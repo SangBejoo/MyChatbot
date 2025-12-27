@@ -30,9 +30,10 @@ func NewHandler(service *usecases.MessageService, dashboard *usecases.DashboardU
 	}
 }
 
-func SetupRoutes(r *gin.Engine, service *usecases.MessageService, auth *usecases.AuthUsecase, dashboard *usecases.DashboardUsecase, waManager *infrastructure.WhatsAppManager, userRepo *repository.UserRepository, usageRepo *repository.UsageRepository, middleware *Middleware) {
+func SetupRoutes(r *gin.Engine, service *usecases.MessageService, auth *usecases.AuthUsecase, dashboard *usecases.DashboardUsecase, waManager *infrastructure.WhatsAppManager, tgManager *infrastructure.TelegramBotManager, userRepo *repository.UserRepository, usageRepo *repository.UsageRepository, middleware *Middleware) {
 	h := NewHandler(service, dashboard, waManager, usageRepo, userRepo)
 	adminHandler := NewAdminHandler(userRepo, waManager)
+	telegramHandler := NewTelegramHandler(tgManager, userRepo)
 	
 	// Apply Security Middleware
 	r.Use(SecurityHeaders())
@@ -113,11 +114,14 @@ func SetupRoutes(r *gin.Engine, service *usecases.MessageService, auth *usecases
 		api.PUT("/tables/:name/row", h.UpdateRow)
 		api.DELETE("/tables/:name/row", h.DeleteRow)
 		
-		// WhatsApp Management Routes (Protected - per-user)
-		api.GET("/whatsapp/qr", h.GetUserQRCode)
-		api.GET("/whatsapp/status", h.GetUserWhatsAppStatus)
-		api.POST("/whatsapp/connect", h.ConnectUserWhatsApp)
-		api.POST("/whatsapp/logout", h.LogoutUserWhatsApp)
+		// WhatsApp Management Routes - DISABLED (using Telegram)
+		// api.GET("/whatsapp/qr", h.GetUserQRCode)
+		// api.GET("/whatsapp/status", h.GetUserWhatsAppStatus)
+		// api.POST("/whatsapp/connect", h.ConnectUserWhatsApp)
+		// api.POST("/whatsapp/logout", h.LogoutUserWhatsApp)
+		
+		// Telegram Management Routes (per-user bots)
+		telegramHandler.RegisterRoutes(api)
 	}
 	
 	// Admin-only Routes

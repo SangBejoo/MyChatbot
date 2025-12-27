@@ -12,27 +12,27 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
+// MessageService handles incoming messages with rule-based responses
+// AI functionality moved to separate microservice
 type MessageService struct {
-	geminiClient    interfaces.AIClient
 	messengerClient interfaces.Messenger
 	TelegramClient  *infrastructure.TelegramClient
 	WhatsAppClient  *infrastructure.WhatsAppClient
-	ProductRepo     *repository.ProductRepository
 	ConfigRepo      *repository.ConfigRepository
 	TableManager    *repository.TableManager
 }
 
-func NewMessageService(gemini interfaces.AIClient, messenger interfaces.Messenger, configRepo *repository.ConfigRepository, tableManager *repository.TableManager) *MessageService {
+// NewMessageService creates a new rule-based message service
+func NewMessageService(messenger interfaces.Messenger, configRepo *repository.ConfigRepository, tableManager *repository.TableManager) *MessageService {
 	return &MessageService{
-		geminiClient:    gemini,
 		messengerClient: messenger,
 		ConfigRepo:      configRepo,
 		TableManager:    tableManager,
 	}
 }
 
-// ProcessMessage handles incoming messages with priority-based response system
-// Priority: 1. Greeting → 2. MENU → 3. Menu Selection → 4. Keyword → 5. Search → 6. AI (optional) → 7. Default
+// ProcessMessage handles incoming messages with priority-based rule system
+// Priority: 1. Greeting → 2. MENU → 3. Menu Selection → 4. Search → 5. Default
 func (s *MessageService) ProcessMessage(msg entities.Message) error {
 	content := strings.TrimSpace(msg.Content)
 	contentLower := strings.ToLower(content)
@@ -42,7 +42,7 @@ func (s *MessageService) ProcessMessage(msg entities.Message) error {
 	}
 
 	// DEBUG: Log what we received
-	fmt.Printf("[BOT] Received: '%s' (lower: '%s') from %s, schema: %s\n", content, contentLower, msg.From, schema)
+	fmt.Printf("[BOT] Received: '%s' from %s, schema: %s\n", content, msg.From, schema)
 
 	// 1. GREETING DETECTION
 	if s.isGreeting(contentLower) {
@@ -50,7 +50,7 @@ func (s *MessageService) ProcessMessage(msg entities.Message) error {
 		return s.sendReply(msg, s.getWelcomeMessage(schema))
 	}
 
-	// 2. MENU COMMAND - Show all available menus (flexible matching)
+	// 2. MENU COMMAND - Show all available menus
 	if s.isMenuCommand(contentLower) {
 		fmt.Printf("[BOT] Matched: MENU command\n")
 		return s.sendReply(msg, s.getMenuList(schema))
@@ -69,25 +69,18 @@ func (s *MessageService) ProcessMessage(msg entities.Message) error {
 		return s.handleDatasetSearch(msg, schema, query)
 	}
 
-	// 5. CALCULATION (has weight like "2kg", "500g")
+	// 5. CALCULATION hint (has weight like "2kg", "500g")
 	if s.hasWeightPattern(contentLower) {
-		// For now, just indicate calculation is possible - can be expanded
 		return s.sendReply(msg, "🧮 *Untuk menghitung harga:*\nSilakan pilih produk dari MENU, lalu masukkan jumlah yang diinginkan.\n\nKetik *MENU* untuk melihat pilihan.")
 	}
 
-	// 6. AI RESPONSE (only if enabled)
-	aiEnabled := s.isAIEnabled(schema)
-	if aiEnabled && s.geminiClient != nil {
-		return s.processWithAI(msg, schema)
-	}
-
-	// 7. DEFAULT FALLBACK
+	// 6. DEFAULT FALLBACK
 	return s.sendReply(msg, s.getDefaultResponse())
 }
 
 // isGreeting checks if message is a greeting
 func (s *MessageService) isGreeting(content string) bool {
-	greetings := []string{"halo", "hai", "hello", "hi", "selamat pagi", "selamat siang", "selamat sore", "selamat malam", "assalamualaikum", "asslmkm"}
+	greetings := []string{"halo", "hai", "hello", "hi", "selamat pagi", "selamat siang", "selamat sore", "selamat malam", "assalamualaikum", "asslmkm", "start", "/start"}
 	for _, g := range greetings {
 		if strings.Contains(content, g) {
 			return true
@@ -203,7 +196,6 @@ func (s *MessageService) handleDatasetSearch(msg entities.Message, schema, query
 
 // hasWeightPattern checks if message contains weight pattern like "2kg" or "500g"
 func (s *MessageService) hasWeightPattern(content string) bool {
-	// Simple check for kg or g with number
 	for i, c := range content {
 		if c >= '0' && c <= '9' {
 			rest := content[i:]
@@ -214,48 +206,6 @@ func (s *MessageService) hasWeightPattern(content string) bool {
 		}
 	}
 	return false
-}
-
-// isAIEnabled checks if AI is enabled for this tenant
-func (s *MessageService) isAIEnabled(schema string) bool {
-	if s.ConfigRepo == nil {
-		return false // Default: AI disabled
-	}
-	enabled, err := s.ConfigRepo.GetConfig(schema, "ai_enabled")
-	if err != nil {
-		return false // Default: AI disabled if config not found
-	}
-	return enabled == "true" || enabled == "1"
-}
-
-// processWithAI handles AI-powered response (only called if AI enabled)
-func (s *MessageService) processWithAI(msg entities.Message, schema string) error {
-	systemPrompt := `You are a helpful assistant. 
-Keep responses SHORT and CONCISE.
-Only answer based on the provided context. 
-If the question is outside your knowledge, politely decline.
-Do NOT make up information.`
-
-	if s.ConfigRepo != nil {
-		if customPrompt, err := s.ConfigRepo.GetConfig(schema, "ai_system_prompt"); err == nil && customPrompt != "" {
-			systemPrompt = customPrompt
-		}
-	}
-
-	var fullPrompt string
-	if msg.AIContext != "" {
-		fullPrompt = systemPrompt + "\n\nCONTEXT/DATABASE:\n" + msg.AIContext + "\n\nUser: " + msg.Content
-	} else {
-		fullPrompt = systemPrompt + "\n\nUser: " + msg.Content
-	}
-
-	aiResponse, err := s.geminiClient.GenerateResponse(fullPrompt)
-	if err != nil {
-		// AI failed - return friendly error
-		return s.sendReply(msg, "⚠️ Maaf, sistem AI sedang sibuk. Silakan coba lagi nanti.\n\nKetik *MENU* untuk melihat pilihan manual.")
-	}
-
-	return s.sendReply(msg, aiResponse)
 }
 
 // getDefaultResponse returns default fallback message
@@ -286,23 +236,18 @@ func (s *MessageService) handleDynamicMenu(msg entities.Message) (bool, error) {
 		return false, nil
 	}
 
-	// Fetch 'main_menu' (hardcoded for now, could be contextual)
-	menu, err := s.ConfigRepo.GetMenu("public", "main_menu")
-	
-	// If menu doesn't exist, ignore (or log)
+	schema := msg.SchemaName
+	if schema == "" {
+		schema = "public"
+	}
+
+	// Fetch 'main_menu'
+	menu, err := s.ConfigRepo.GetMenu(schema, "main_menu")
 	if err != nil {
-		return false, nil // Not treated as error to allow flow to continue
+		return false, nil
 	}
 
 	// Parse Items
-	// The 'Items' field in database is JSONB but repository returns struct where Items is interface{}?
-	// Let's check repository.Menu definition.
-	// Assuming Items is json.RawMessage or similar if coming from Postgres JSONB, 
-	// or we need to marshal/unmarshal.
-	// Actually repository.Menu.Items is defined as interface{} in previous context? 
-	// Let's assume it maps to []MenuItem struct structure if Unmarshaled.
-	
-	// Safest way given Go types: Marshal back to bytes then Unmarshal to []MenuItem
 	itemsBytes, _ := json.Marshal(menu.Items)
 	var items []repository.MenuItem
 	if err := json.Unmarshal(itemsBytes, &items); err != nil {
@@ -310,18 +255,12 @@ func (s *MessageService) handleDynamicMenu(msg entities.Message) (bool, error) {
 	}
 
 	for _, item := range items {
-		// Simple Case-Insensitive Match
-		// Note: User can type "1" or "Label". For now assume exact Label match or "1" if we implemented numbering.
-		// Let's stick to Label match for simplicity of "customize menu".
-		if item.Label == msg.Content { // Exact match for now
-			// Execute Action
+		if item.Label == msg.Content {
 			switch item.Action {
 			case "view_table":
-				return s.handleViewTable(msg.From, item.Payload)
+				return s.handleViewTable(msg, item.Payload)
 			case "reply":
-				if s.WhatsAppClient != nil {
-					return true, s.WhatsAppClient.SendMessage(msg.From, item.Payload)
-				}
+				return true, s.sendReply(msg, item.Payload)
 			}
 		}
 	}
@@ -329,24 +268,30 @@ func (s *MessageService) handleDynamicMenu(msg entities.Message) (bool, error) {
 	return false, nil
 }
 
-func (s *MessageService) handleViewTable(to, tableName string) (bool, error) {
+func (s *MessageService) handleViewTable(msg entities.Message, tableName string) (bool, error) {
 	if s.TableManager == nil {
 		return false, fmt.Errorf("table manager not initialized")
 	}
-	data, err := s.TableManager.GetTableData("public", tableName)
+	
+	schema := msg.SchemaName
+	if schema == "" {
+		schema = "public"
+	}
+	
+	data, err := s.TableManager.GetTableData(schema, tableName)
 	if err != nil {
-		return true, s.WhatsAppClient.SendMessage(to, fmt.Sprintf("Error fetching table '%s': %v", tableName, err))
+		return true, s.sendReply(msg, fmt.Sprintf("Error fetching table '%s': %v", tableName, err))
 	}
 
 	if len(data) == 0 {
-		return true, s.WhatsAppClient.SendMessage(to, fmt.Sprintf("Table '%s' is empty.", tableName))
+		return true, s.sendReply(msg, fmt.Sprintf("Table '%s' is empty.", tableName))
 	}
 
 	// Format as simple list
 	var sb string
 	sb = fmt.Sprintf("*%s Data:*\n\n", tableName)
 	
-	// Limit to 10 rows for safety
+	// Limit to 10 rows
 	limit := 10
 	if len(data) < limit {
 		limit = len(data)
@@ -355,11 +300,8 @@ func (s *MessageService) handleViewTable(to, tableName string) (bool, error) {
 	for i := 0; i < limit; i++ {
 		row := data[i]
 		sb += "- "
-		// Iterate keys? Order is random in map. 
-		// Ideally we use known columns but they are dynamic.
-		// Just print all values.
 		for k, v := range row {
-			if k != "id" { // skip internal ID
+			if k != "id" {
 				sb += fmt.Sprintf("%s: %v, ", k, v)
 			}
 		}
@@ -370,52 +312,32 @@ func (s *MessageService) handleViewTable(to, tableName string) (bool, error) {
 		sb += fmt.Sprintf("\n...and %d more rows.", len(data)-limit)
 	}
 
-	return true, s.WhatsAppClient.SendMessage(to, sb)
+	return true, s.sendReply(msg, sb)
 }
 
+// ProcessMessageWithContext - simplified version without AI
+// Just shows the context data directly
 func (s *MessageService) ProcessMessageWithContext(msg entities.Message) error {
-	systemPrompt := `You are a helpful export-import sales assistant. 
-IMPORTANT: Keep responses SHORT and CONCISE (1-2 sentences max).
-Only answer based on the provided product database. 
-Do NOT answer questions outside the database.
-
-PRODUCT DATABASE:
-` + msg.AIContext + `
-
-Answer briefly, be professional, provide specific pricing from database.`
-
-	fullPrompt := systemPrompt + "\n\nCustomer: " + msg.Content
-
-	aiResponse, err := s.geminiClient.GenerateResponse(fullPrompt)
-	if err != nil {
-		if s.WhatsAppClient != nil && msg.Platform == "whatsapp" {
-			return s.WhatsAppClient.SendMessage(msg.From, "Error generating response: "+err.Error())
-		}
-		return s.messengerClient.SendMessage(msg.From, "Error generating response: "+err.Error())
-	}
-
+	// Without AI, just show a helpful message
+	response := "📦 *Data tersedia*\n\nKetik *MENU* untuk melihat pilihan.\nKetik *CARI [nama]* untuk mencari produk."
+	
 	// WhatsApp Specific Logic
 	if msg.Platform == "whatsapp" && s.WhatsAppClient != nil {
-		// Append text-based menu
-		menuText := "\n\n1. 🧮 Calculate Price\n2. ❓ Ask More\n3. 🏠 Back to Menu\n\n_Reply with number to choose_"
-		return s.WhatsAppClient.SendMessage(msg.From, aiResponse+menuText)
+		menuText := "\n\n1. 🧮 Hitung Harga\n2. 📋 Lihat Menu\n3. 🔍 Cari Produk\n\n_Balas dengan nomor untuk memilih_"
+		return s.WhatsAppClient.SendMessage(msg.From, response+menuText)
 	}
 
 	// Telegram Specific Logic
 	if s.TelegramClient != nil {
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("🧮 Calculate Price", "action_calculate"),
-				tgbotapi.NewInlineKeyboardButtonData("❓ Ask More", "action_ask"),
-			),
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("🏠 Back to Menu", "action_menu"),
+				tgbotapi.NewInlineKeyboardButtonData("📋 Menu", "action_menu"),
+				tgbotapi.NewInlineKeyboardButtonData("🔍 Cari", "action_search"),
 			),
 		)
-		return s.TelegramClient.SendMessageWithMenu(msg.From, aiResponse, keyboard)
+		return s.TelegramClient.SendMessageWithMenu(msg.From, response, keyboard)
 	}
 
 	// Fallback
-	response := entities.Response{Content: aiResponse}
-	return s.messengerClient.SendMessage(msg.From, response.Content)
+	return s.sendReply(msg, response)
 }

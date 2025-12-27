@@ -2,9 +2,8 @@ package interfaces
 
 import "project_masAde/internal/entities"
 
-type AIClient interface {
-	GenerateResponse(prompt string) (string, error)
-}
+// AIClient removed - AI handled by separate microservice
+// See: AI Service project for AI integration
 
 type Messenger interface {
 	SendMessage(to, content string) error

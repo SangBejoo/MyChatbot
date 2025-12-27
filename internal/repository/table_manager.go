@@ -165,22 +165,23 @@ func (m *TableManager) ListTables(schemaName string) ([]TableMetadata, error) {
 }
 
 // GetTableData fetches data from a dynamic table within the given schema
-func (m *TableManager) GetTableData(schemaName, tableName string) ([]map[string]interface{}, error) {
+// Supports lookup by table_name (dt_xxx_timestamp) OR display_name (user-friendly name)
+func (m *TableManager) GetTableData(schemaName, tableNameOrDisplay string) ([]map[string]interface{}, error) {
 	if schemaName == "" {
 		schemaName = "public"
 	}
 	registryTable := qualifyTable(schemaName, "dynamic_tables")
-	qualifiedTable := qualifyTable(schemaName, tableName)
 	
-	// Verify table exists in registry to prevent SQL Injection via tableName
-	var exists bool
-	err := m.db.QueryRow(context.Background(), fmt.Sprintf("SELECT EXISTS(SELECT 1 FROM %s WHERE table_name=$1)", registryTable), tableName).Scan(&exists)
+	// Try to find table by table_name first, then by display_name
+	var actualTableName string
+	err := m.db.QueryRow(context.Background(), 
+		fmt.Sprintf("SELECT table_name FROM %s WHERE table_name=$1 OR display_name=$1 LIMIT 1", registryTable), 
+		tableNameOrDisplay).Scan(&actualTableName)
 	if err != nil {
-		return nil, err
-	}
-	if !exists {
 		return nil, fmt.Errorf("table not found or unauthorized")
 	}
+	
+	qualifiedTable := qualifyTable(schemaName, actualTableName)
 
 	// Fetch data
 	rows, err := m.db.Query(context.Background(), fmt.Sprintf("SELECT * FROM %s", qualifiedTable))
